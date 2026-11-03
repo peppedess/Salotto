@@ -21,9 +21,6 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4
 
@@ -38,7 +35,9 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -E '^e: ' build.log || tail -n 60 build.log
+          if [ -f build.log ]; then
+            grep -E '^e: ' build.log || tail -n 60 build.log
+          fi
 
       - name: Pubblica APK
         shell: bash
