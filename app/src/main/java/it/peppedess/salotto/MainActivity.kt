@@ -20,6 +20,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import it.peppedess.salotto.data.Settings
 import it.peppedess.salotto.kiosk.Kiosk
 import it.peppedess.salotto.ui.HomeViewModel
+import it.peppedess.salotto.ui.NavSoundProvider
 import it.peppedess.salotto.ui.SalottoApp
 import it.peppedess.salotto.ui.theme.SalottoTheme
 import kotlinx.coroutines.flow.combine
@@ -56,7 +57,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             SalottoTheme {
-                SalottoApp(vm)
+                NavSoundProvider(vm) {
+                    SalottoApp(vm)
+                }
             }
         }
     }
@@ -97,6 +100,9 @@ class MainActivity : ComponentActivity() {
     private var swallowKey = false
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && event.keyCode in NAV_KEYS) {
+            vm.navKeyPressed()
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             if (vm.userActivity()) {
                 swallowKey = true
@@ -134,5 +140,12 @@ class MainActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
         }
+    }
+
+    private companion object {
+        val NAV_KEYS = setOf(
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_TAB,
+        )
     }
 }

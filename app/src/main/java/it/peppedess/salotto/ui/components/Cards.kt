@@ -6,7 +6,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.ui.draw.shadow
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -65,6 +64,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
 import coil3.compose.AsyncImage
 import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.ContinueItem
@@ -102,7 +104,7 @@ fun TvCard(
         label = "scale",
     )
     val borderAlpha by animateFloatAsState(if (focused) 1f else 0f, label = "border")
-    val glow by animateDpAsState(if (focused) 18.dp else 0.dp, label = "glow")
+    val navSound = LocalNavSound.current
 
     Box(
         modifier = modifier
@@ -111,17 +113,13 @@ fun TvCard(
                 scaleX = scale
                 scaleY = scale
             }
-            .then(
-                if (glow > 0.dp) {
-                    Modifier.shadow(glow, shape, ambientColor = Color.White.copy(alpha = 0.35f), spotColor = Color.White.copy(alpha = 0.45f))
-                } else {
-                    Modifier
-                }
-            )
             .onFocusChanged { state ->
                 if (state.isFocused != focused) {
                     focused = state.isFocused
-                    if (state.isFocused) onFocus()
+                    if (state.isFocused) {
+                        navSound()
+                        onFocus()
+                    }
                 }
             }
             .onPreviewKeyEvent { e ->
@@ -151,8 +149,15 @@ fun TvCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ShelfRow(title: String, order: Int, icon: ImageBitmap? = null, content: LazyListScope.() -> Unit) {
+fun ShelfRow(
+    title: String,
+    order: Int,
+    icon: ImageBitmap? = null,
+    modifier: Modifier = Modifier,
+    content: LazyListScope.() -> Unit,
+) {
     // L'ingresso a cascata si vede solo la prima volta: scorrendo le righe restano visibili.
     val firstTime = remember(title) { title !in shownRows }
     val appear = remember(title) { Animatable(if (firstTime) 0f else 1f) }
@@ -163,8 +168,10 @@ fun ShelfRow(title: String, order: Int, icon: ImageBitmap? = null, content: Lazy
             appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
         }
     }
+    val density = LocalDensity.current
+    val pivot = remember(density) { with(density) { pivotSpec(ROW_START.toPx()) } }
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
             .graphicsLayer {
                 alpha = appear.value.coerceIn(0f, 1f)
@@ -172,7 +179,7 @@ fun ShelfRow(title: String, order: Int, icon: ImageBitmap? = null, content: Lazy
             }
     ) {
         Row(
-            Modifier.padding(start = 40.dp, top = 14.dp, end = 40.dp),
+            Modifier.padding(start = ROW_START, top = 10.dp, end = ROW_START),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
@@ -186,13 +193,18 @@ fun ShelfRow(title: String, order: Int, icon: ImageBitmap? = null, content: Lazy
                 color = Color.White,
             )
         }
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 40.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            content = content,
-        )
+        CompositionLocalProvider(LocalBringIntoViewSpec provides pivot) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = ROW_START, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                content = content,
+            )
+        }
     }
 }
+
+/** Margine sinistro di righe e titoli, come il bordo sicuro di una TV. */
+val ROW_START = 40.dp
 
 @Composable
 fun AppCard(
@@ -247,7 +259,7 @@ fun ContinueCard(
     val remaining = if (item.durationMs > 0) ((item.durationMs - item.positionMs) / 60_000L).toInt() else -1
     TvCard(
         onClick = onClick,
-        modifier = Modifier.width(220.dp).aspectRatio(16f / 9f),
+        modifier = Modifier.width(200.dp).aspectRatio(16f / 9f),
         onFocus = { onFocus(tint) },
         onMenu = onMenu,
     ) {
@@ -334,10 +346,7 @@ fun ContinueCard(
 
 private val shownRows = mutableSetOf<String>()
 
-/**
- * Locandina di un film o una serie. Con il D-pad, quando è selezionata si allarga
- * mostrando l'immagine orizzontale, i generi, il voto e l'inizio della trama.
- */
+/** Locandina di un film o una serie: le informazioni compaiono nell'intestazione in alto. */
 @Composable
 fun PosterCard(
     title: TmdbTitle,
@@ -345,24 +354,13 @@ fun PosterCard(
     onClick: () -> Unit,
     onFocus: (Color) -> Unit,
     shareKey: String? = null,
+    modifier: Modifier = Modifier,
 ) {
-    var focused by remember { mutableStateOf(false) }
-    val canExpand = title.backdropUrl != null
-    val width by animateDpAsState(
-        targetValue = if (focused && canExpand) EXPANDED_W else POSTER_W,
-        animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
-        label = "posterWidth",
-    )
-    val expand by animateFloatAsState(if (focused && canExpand) 1f else 0f, tween(260), label = "expand")
-
     TvCard(
         onClick = onClick,
-        modifier = Modifier
-            .width(width)
-            .height(POSTER_H)
-            .onFocusChanged { focused = it.hasFocus },
-        shape = RoundedCornerShape(14.dp),
-        focusScale = 1.03f,
+        modifier = modifier.width(POSTER_W).height(POSTER_H),
+        shape = RoundedCornerShape(12.dp),
+        focusScale = 1.08f,
         onFocus = { onFocus(tint) },
     ) {
         Box(
@@ -386,61 +384,10 @@ fun PosterCard(
                 model = title.posterUrl,
                 contentDescription = title.title,
                 modifier = Modifier
-                    .width(POSTER_W)
-                    .fillMaxHeight()
-                    .sharedPoster(shareKey)
-                    .graphicsLayer { alpha = 1f - expand },
+                    .fillMaxSize()
+                    .sharedPoster(shareKey),
                 contentScale = ContentScale.Crop,
             )
-        }
-        if (expand > 0f) {
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = expand }) {
-                AsyncImage(
-                    model = title.backdropUrl,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Brush.verticalGradient(0.2f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.92f)))
-                )
-                Column(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(12.dp)
-                ) {
-                    Text(
-                        title.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        listOfNotNull(
-                            title.year.takeIf { it.isNotBlank() },
-                            title.kindLabel,
-                            title.genres.take(2).joinToString(", ").takeIf { it.isNotBlank() },
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.8f),
-                        maxLines = 1,
-                    )
-                    if (title.overview.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            title.overview,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.85f),
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
         }
         if (title.rating >= 0.5) {
             Text(
@@ -459,9 +406,8 @@ fun PosterCard(
     }
 }
 
-private val POSTER_W = 118.dp
-private val POSTER_H = 177.dp
-private val EXPANDED_W = 315.dp
+val POSTER_W = 104.dp
+val POSTER_H = 156.dp
 
 /** Riquadro di un'entità di Home Assistant: luce, interruttore, scena… */
 @Composable

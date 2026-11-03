@@ -199,6 +199,29 @@ class TmdbClient(credential: String) {
         )
     }
 
+    suspend fun trending(type: String): List<TmdbTitle> = parseList(get("/trending/$type/week"), type)
+
+    /** Titoli di un genere, se possibile solo tra quelli disponibili sui servizi indicati. */
+    suspend fun discoverGenre(type: String, genreId: Int, providerIds: List<Int>): List<TmdbTitle> =
+        parseList(get("/discover/$type", discoverParams(providerIds) + ("with_genres" to genreId.toString())), type)
+
+    /** Uscite degli ultimi due mesi sui servizi indicati. */
+    suspend fun discoverRecent(type: String, providerIds: List<Int>): List<TmdbTitle> {
+        val from = java.time.LocalDate.now().minusDays(60).toString()
+        val dateKey = if (type == "tv") "first_air_date.gte" else "primary_release_date.gte"
+        return parseList(get("/discover/$type", discoverParams(providerIds) + (dateKey to from)), type)
+    }
+
+    private fun discoverParams(providerIds: List<Int>): Map<String, String> {
+        val params = mutableMapOf("sort_by" to "popularity.desc", "vote_count.gte" to "20")
+        if (providerIds.isNotEmpty()) {
+            params["watch_region"] = REGION
+            params["with_watch_providers"] = providerIds.joinToString("|")
+            params["with_watch_monetization_types"] = "flatrate|free|ads"
+        }
+        return params
+    }
+
     suspend fun recommendations(title: TmdbTitle): List<TmdbTitle> =
         parseList(get("/${title.type}/${title.id}/recommendations"), title.type)
 

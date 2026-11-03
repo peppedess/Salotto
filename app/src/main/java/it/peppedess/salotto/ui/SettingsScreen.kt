@@ -64,6 +64,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.SystemUpdate
 import it.peppedess.salotto.ui.components.PinDialog
@@ -165,6 +166,15 @@ fun SettingsScreen(
                 )
             }
 
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.MusicNote,
+                    title = "Suoni di navigazione",
+                    subtitle = "Un clic leggero quando sposti la selezione con il telecomando",
+                    checked = settings.navSounds,
+                    onClick = { vm.updateSettings { s -> s.copy(navSounds = !s.navSounds) } },
+                )
+            }
             item {
                 SettingRow(
                     icon = Icons.Rounded.Movie,

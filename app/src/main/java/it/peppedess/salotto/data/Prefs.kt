@@ -22,6 +22,7 @@ data class Settings(
     val haToken: String = "",
     val haEntities: List<String> = emptyList(),
     val entertainmentOnly: Boolean = true,
+    val navSounds: Boolean = true,
     val liveTv: Boolean = true,
     val autoUpdate: Boolean = true,
     val episodeAlerts: Boolean = true,
@@ -105,6 +106,7 @@ class Prefs(context: Context) {
             putString(KEY_HA_TOKEN, s.haToken)
             putString(KEY_HA_ENTITIES, s.haEntities.joinToString("\n"))
             putBoolean(KEY_ENTERTAINMENT, s.entertainmentOnly)
+            putBoolean(KEY_NAV_SOUNDS, s.navSounds)
             putBoolean(KEY_LIVE_TV, s.liveTv)
             putBoolean(KEY_AUTO_UPDATE, s.autoUpdate)
             putBoolean(KEY_EPISODE_ALERTS, s.episodeAlerts)
@@ -230,6 +232,7 @@ class Prefs(context: Context) {
         haToken = sp.getString(KEY_HA_TOKEN, "").orEmpty(),
         haEntities = lines(KEY_HA_ENTITIES),
         entertainmentOnly = sp.getBoolean(KEY_ENTERTAINMENT, true),
+        navSounds = sp.getBoolean(KEY_NAV_SOUNDS, true),
         liveTv = sp.getBoolean(KEY_LIVE_TV, true),
         autoUpdate = sp.getBoolean(KEY_AUTO_UPDATE, true),
         episodeAlerts = sp.getBoolean(KEY_EPISODE_ALERTS, true),
@@ -290,6 +293,7 @@ class Prefs(context: Context) {
         const val KEY_HA_TOKEN = "ha_token"
         const val KEY_HA_ENTITIES = "ha_entities"
         const val KEY_ENTERTAINMENT = "entertainment_only"
+        const val KEY_NAV_SOUNDS = "nav_sounds"
         const val KEY_LIVE_TV = "live_tv"
         const val KEY_AUTO_UPDATE = "auto_update"
         const val KEY_EPISODE_ALERTS = "episode_alerts"

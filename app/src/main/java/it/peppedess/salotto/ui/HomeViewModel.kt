@@ -86,6 +86,14 @@ data class ProviderRow(
     val titles: List<TmdbTitle>,
 )
 
+/** Riga delle schede Film e Serie TV. */
+data class CatalogRow(
+    val key: String,
+    val title: String,
+    val titles: List<TmdbTitle>,
+    val app: AppEntry? = null,
+)
+
 /** Scheda dettagli di un film o serie, con le app installate dove guardarlo. */
 data class DetailState(
     val title: TmdbTitle,
@@ -140,6 +148,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _homeTick = MutableStateFlow(0)
     val homeTick: StateFlow<Int> = _homeTick.asStateFlow()
 
+    private val _navKey = MutableStateFlow(0)
+    /** Cresce a ogni tasto direzionale: serve a selezionare il primo elemento se non c'è selezione. */
+    val navKey: StateFlow<Int> = _navKey.asStateFlow()
+
+    fun navKeyPressed() {
+        _navKey.value = _navKey.value + 1
+    }
+
     private val _providerRows = MutableStateFlow<List<ProviderRow>>(emptyList())
     val providerRows: StateFlow<List<ProviderRow>> = _providerRows.asStateFlow()
 
@@ -148,6 +164,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _catalogStatus = MutableStateFlow("")
     val catalogStatus: StateFlow<String> = _catalogStatus.asStateFlow()
+
+    private val _movieRows = MutableStateFlow<List<CatalogRow>>(emptyList())
+    val movieRows: StateFlow<List<CatalogRow>> = _movieRows.asStateFlow()
+    private val _tvRows = MutableStateFlow<List<CatalogRow>>(emptyList())
+    val tvRows: StateFlow<List<CatalogRow>> = _tvRows.asStateFlow()
+    private var providerMatches: List<Pair<it.peppedess.salotto.data.TmdbProvider, AppEntry>> = emptyList()
+    private val browseRequested = mutableSetOf<String>()
+    private val browseLoaded = mutableSetOf<String>()
 
     private val _detail = MutableStateFlow<DetailState?>(null)
     val detail: StateFlow<DetailState?> = _detail.asStateFlow()
@@ -539,6 +563,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
         _providerRows.value = rows
         _providerPackages.value = matched.map { it.second.packageName }.toSet()
+        providerMatches = matched
+        browseLoaded.clear()
+        browseRequested.toList().forEach { loadBrowse(it) }
         _trending.value = safe { client.trending() }.filter { it.posterUrl != null }
         _catalogStatus.value = if (rows.isEmpty()) {
             "Nessuna app di streaming riconosciuta"
@@ -628,7 +655,43 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (current != null && current.title.key == title.key) _detail.value = change(current)
     }
 
+    /** Carica le righe della scheda Film ("movie") o Serie TV ("tv") la prima volta che si apre. */
+    fun loadBrowse(type: String) {
+        browseRequested += type
+        val key = prefs.settings.value.tmdbKey.trim()
+        if (key.isBlank() || !browseLoaded.add(type)) return
+        val client = TmdbClient(key)
+        val matches = providerMatches
+        val providerIds = matches.map { it.first.id }
+        val genres = if (type == "tv") TV_GENRES else MOVIE_GENRES
+        val kind = if (type == "tv") "Serie" else "Film"
+        viewModelScope.launch {
+            val rows = coroutineScope {
+                val trending = async {
+                    CatalogRow("trend", "$kind di tendenza", safe { client.trending(type) })
+                }
+                val recent = async {
+                    CatalogRow("recent", if (type == "tv") "Nuove serie sui tuoi servizi" else "Arrivati da poco sui tuoi servizi", safe { client.discoverRecent(type, providerIds) })
+                }
+                val perProvider = matches.map { (provider, app) ->
+                    async {
+                        CatalogRow("prov:${app.packageName}", "$kind su ${app.label}", safe { client.discover(type, provider.id) }, app)
+                    }
+                }
+                val perGenre = genres.map { (id, name) ->
+                    async { CatalogRow("genre:$id", name, safe { client.discoverGenre(type, id, providerIds) }) }
+                }
+                listOf(trending, recent).awaitAll() + perProvider.awaitAll() + perGenre.awaitAll()
+            }.map { row -> row.copy(titles = row.titles.filter { it.posterUrl != null }.distinctBy { it.key }.take(20)) }
+                .filter { it.titles.size >= 3 }
+            if (type == "tv") _tvRows.value = rows else _movieRows.value = rows
+            if (rows.isEmpty()) browseLoaded.remove(type)
+        }
+    }
+
     fun refreshCatalog() {
+        browseLoaded.clear()
+        browseRequested.toList().forEach { loadBrowse(it) }
         prefs.clearArtCache()
         store.clearRemoteArt()
         catalogTick.value = catalogTick.value + 1
@@ -800,6 +863,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             )
         }.isSuccess
         if (!sent) start(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
+    }
+
+    fun openWifi() {
+        val panel = if (Build.VERSION.SDK_INT >= 29) AndroidSettings.Panel.ACTION_INTERNET_CONNECTIVITY else AndroidSettings.ACTION_WIFI_SETTINGS
+        if (!start(Intent(panel), quiet = true)) start(Intent(AndroidSettings.ACTION_WIFI_SETTINGS))
     }
 
     fun openBluetoothSettings() = start(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
@@ -1049,6 +1117,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        val MOVIE_GENRES = listOf(
+            28 to "Azione", 35 to "Commedia", 18 to "Dramma", 53 to "Thriller", 878 to "Fantascienza",
+            16 to "Animazione", 27 to "Horror", 10749 to "Romantici", 10751 to "Per tutta la famiglia", 99 to "Documentari",
+        )
+        val TV_GENRES = listOf(
+            80 to "Crime", 18 to "Drammi", 35 to "Commedie", 10765 to "Fantascienza e fantasy", 9648 to "Mistero",
+            10759 to "Azione e avventura", 16 to "Animazione", 99 to "Documentari", 10764 to "Reality",
+        )
         const val MAX_PROVIDER_ROWS = 6
         const val CATALOG_TTL_MS = 6L * 60 * 60 * 1000
         const val HA_POLL_MS = 15_000L

@@ -339,3 +339,28 @@ private fun KidsLockScreen(name: String, onExtra: () -> Unit, onSwitch: () -> Un
         }
     }
 }
+
+/** Suono di navigazione di sistema, leggero e senza ripetizioni troppo ravvicinate. */
+@Composable
+fun NavSoundProvider(vm: HomeViewModel, content: @Composable () -> Unit) {
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val audio = remember { context.getSystemService(android.media.AudioManager::class.java) }
+    val enabled = settings.navSounds
+    val sound: () -> Unit = remember(enabled) {
+        var last = 0L
+        val play: () -> Unit = {
+            if (enabled) {
+                val t = android.os.SystemClock.uptimeMillis()
+                if (t - last > 45) {
+                    last = t
+                    runCatching { audio?.playSoundEffect(android.media.AudioManager.FX_FOCUS_NAVIGATION_DOWN, 0.35f) }
+                }
+            }
+        }
+        play
+    }
+    CompositionLocalProvider(it.peppedess.salotto.ui.components.LocalNavSound provides sound) {
+        content()
+    }
+}
