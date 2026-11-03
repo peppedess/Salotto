@@ -62,7 +62,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import it.peppedess.salotto.data.TmdbTitle
 import it.peppedess.salotto.ui.components.AppCard
+import it.peppedess.salotto.ui.components.PosterCard
+import kotlinx.coroutines.delay
 import it.peppedess.salotto.ui.components.ContinueCard
 import it.peppedess.salotto.ui.components.MorphMic
 import it.peppedess.salotto.ui.components.ShelfRow
@@ -83,6 +86,7 @@ fun SearchScreen(
     vm: HomeViewModel,
     startWithVoice: Boolean,
     onClose: () -> Unit,
+    onOpenTitle: (TmdbTitle) -> Unit,
 ) {
     BackHandler(onBack = onClose)
     val context = LocalContext.current
@@ -156,6 +160,15 @@ fun SearchScreen(
             emptyList()
         } else {
             media.filter { it.title.contains(q, ignoreCase = true) || it.subtitle.contains(q, ignoreCase = true) }
+        }
+    }
+    var titles by remember { mutableStateOf<List<TmdbTitle>>(emptyList()) }
+    LaunchedEffect(q) {
+        if (q.length < 2) {
+            titles = emptyList()
+        } else {
+            delay(450)
+            titles = vm.searchTitles(q)
         }
     }
     val byPkg = remember(apps) { apps.associateBy { it.packageName } }
@@ -276,6 +289,20 @@ fun SearchScreen(
                         ShelfRow("Cerca \"$q\" su", 0) {
                             items(actions, key = { it.label }) { action ->
                                 ActionCard(action) { action.run(q) }
+                            }
+                        }
+                    }
+                    if (titles.isNotEmpty()) {
+                        item(key = "titles") {
+                            ShelfRow("Film e serie", 1) {
+                                items(titles, key = { it.key }) { t ->
+                                    PosterCard(
+                                        title = t,
+                                        tint = DefaultAmbient,
+                                        onClick = { onOpenTitle(t) },
+                                        onFocus = {},
+                                    )
+                                }
                             }
                         }
                     }

@@ -35,7 +35,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
@@ -72,22 +74,25 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.ContinueItem
+import it.peppedess.salotto.data.TmdbTitle
 import it.peppedess.salotto.ui.components.AppCard
 import it.peppedess.salotto.ui.components.Clock
 import it.peppedess.salotto.ui.components.ContinueCard
+import it.peppedess.salotto.ui.components.PosterCard
 import it.peppedess.salotto.ui.components.ShelfRow
 import it.peppedess.salotto.ui.components.TvCard
 import it.peppedess.salotto.ui.components.TvIconButton
 import it.peppedess.salotto.ui.components.TvPill
 import it.peppedess.salotto.ui.components.darken
-import it.peppedess.salotto.ui.components.rememberFileBitmap
 import it.peppedess.salotto.ui.theme.Bg
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 
-private val DefaultAmbient = Color(0xFF243044)
+internal val DefaultAmbient = Color(0xFF243044)
 
 private sealed interface HeroSlide {
     val key: String
@@ -98,11 +103,22 @@ private sealed interface HeroSlide {
         override val color: Color get() = app?.color ?: DefaultAmbient
     }
 
+    data class Featured(val title: TmdbTitle, val app: AppEntry) : HeroSlide {
+        override val key: String get() = "t:" + title.key
+        override val color: Color get() = app.color
+    }
+
     data class App(val app: AppEntry) : HeroSlide {
         override val key: String get() = "a:" + app.key
         override val color: Color get() = app.color
     }
 }
+
+fun TmdbTitle.metaLine(): String = listOfNotNull(
+    year.takeIf { it.isNotBlank() },
+    kindLabel,
+    if (rating > 0) "★ " + String.format(Locale.ITALIAN, "%.1f", rating) else null,
+).joinToString(" · ")
 
 @Composable
 fun HomeScreen(
@@ -110,6 +126,7 @@ fun HomeScreen(
     onSearch: (voice: Boolean) -> Unit,
     onSettings: () -> Unit,
     onAppMenu: (AppEntry) -> Unit,
+    onOpenTitle: (TmdbTitle, AppEntry?) -> Unit,
 ) {
     val apps by vm.apps.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
@@ -117,6 +134,9 @@ fun HomeScreen(
     val access by vm.notificationAccess.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val homeTick by vm.homeTick.collectAsStateWithLifecycle()
+    val rows by vm.providerRows.collectAsStateWithLifecycle()
+    val trending by vm.trending.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
 
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var ambientTarget by remember { mutableStateOf(DefaultAmbient) }
@@ -150,15 +170,20 @@ fun HomeScreen(
                         apps = apps,
                         favorites = favorites,
                         media = media,
+                        rows = rows,
+                        trending = trending,
                         byPkg = byPkg,
                         access = access,
                         loading = loading,
+                        showTmdbHint = settings.tmdbKey.isBlank(),
                         onAmbient = setAmbient,
                         onLaunch = vm::launch,
                         onResume = vm::resume,
                         onAppMenu = onAppMenu,
                         onMediaMenu = { menuItem = it },
+                        onOpenTitle = onOpenTitle,
                         onEnableAccess = { vm.openNotificationAccess() },
+                        onTmdbHint = onSettings,
                     )
                 } else {
                     AllApps(apps = apps, onAmbient = setAmbient, onLaunch = vm::launch, onAppMenu = onAppMenu)
@@ -228,19 +253,26 @@ private fun ForYou(
     apps: List<AppEntry>,
     favorites: List<AppEntry>,
     media: List<ContinueItem>,
+    rows: List<ProviderRow>,
+    trending: List<TmdbTitle>,
     byPkg: Map<String, AppEntry>,
     access: Boolean,
     loading: Boolean,
+    showTmdbHint: Boolean,
     onAmbient: (Color) -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onResume: (ContinueItem) -> Unit,
     onAppMenu: (AppEntry) -> Unit,
     onMediaMenu: (ContinueItem) -> Unit,
+    onOpenTitle: (TmdbTitle, AppEntry?) -> Unit,
     onEnableAccess: () -> Unit,
+    onTmdbHint: () -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val heroHeight = (maxHeight * 0.62f).coerceIn(170.dp, 440.dp)
-        val slides = remember(media, favorites, apps, byPkg) { buildSlides(media, favorites, apps, byPkg) }
+        val slides = remember(media, rows, favorites, apps, byPkg) {
+            buildSlides(media, rows, favorites, apps, byPkg)
+        }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -255,6 +287,7 @@ private fun ForYou(
                     onAction = { slide ->
                         when (slide) {
                             is HeroSlide.Media -> onResume(slide.item)
+                            is HeroSlide.Featured -> onOpenTitle(slide.title, slide.app)
                             is HeroSlide.App -> onLaunch(slide.app)
                         }
                     },
@@ -275,7 +308,14 @@ private fun ForYou(
                     }
                 }
             } else if (!access) {
-                item(key = "access") { AccessHint(onEnableAccess) }
+                item(key = "access") {
+                    HintCard(
+                        icon = Icons.Rounded.Notifications,
+                        title = "Attiva \"Continua a guardare\"",
+                        text = "Concedi l'accesso alle notifiche per vedere qui cosa stavi guardando.",
+                        onClick = onEnableAccess,
+                    )
+                }
             }
             if (favorites.isNotEmpty()) {
                 item(key = "favorites") {
@@ -292,9 +332,47 @@ private fun ForYou(
                     }
                 }
             }
+            rows.forEachIndexed { index, row ->
+                item(key = "row:" + row.app.packageName) {
+                    ShelfRow("Popolari su ${row.app.label}", 3 + index, icon = row.app.icon) {
+                        items(row.titles, key = { it.key }) { t ->
+                            PosterCard(
+                                title = t,
+                                tint = row.app.color,
+                                onClick = { onOpenTitle(t, row.app) },
+                                onFocus = onAmbient,
+                            )
+                        }
+                    }
+                }
+            }
+            if (trending.isNotEmpty()) {
+                item(key = "trending") {
+                    ShelfRow("Di tendenza questa settimana", 3 + rows.size) {
+                        items(trending, key = { it.key }) { t ->
+                            PosterCard(
+                                title = t,
+                                tint = DefaultAmbient,
+                                onClick = { onOpenTitle(t, null) },
+                                onFocus = onAmbient,
+                            )
+                        }
+                    }
+                }
+            }
+            if (showTmdbHint) {
+                item(key = "tmdb") {
+                    HintCard(
+                        icon = Icons.Rounded.Movie,
+                        title = "Aggiungi film e serie",
+                        text = "Inserisci una chiave TMDB gratuita nelle impostazioni per locandine e righe dei tuoi servizi di streaming.",
+                        onClick = onTmdbHint,
+                    )
+                }
+            }
             if (apps.isNotEmpty()) {
                 item(key = "apps") {
-                    ShelfRow("Le tue app", 3) {
+                    ShelfRow("Le tue app", 4 + rows.size) {
                         items(apps, key = { it.key }) { app ->
                             AppCard(
                                 app = app,
@@ -312,17 +390,30 @@ private fun ForYou(
 
 private fun buildSlides(
     media: List<ContinueItem>,
+    rows: List<ProviderRow>,
     favorites: List<AppEntry>,
     apps: List<AppEntry>,
     byPkg: Map<String, AppEntry>,
 ): List<HeroSlide> {
     val out = mutableListOf<HeroSlide>()
-    media.take(3).forEach { out += HeroSlide.Media(it, byPkg[it.packageName]) }
-    val pool = favorites.ifEmpty { apps.filter { it.banner != null }.take(5) }
-    pool
-        .filter { app -> media.take(3).none { it.packageName == app.packageName } }
-        .take((5 - out.size).coerceAtLeast(0))
-        .forEach { out += HeroSlide.App(it) }
+    media.take(2).forEach { out += HeroSlide.Media(it, byPkg[it.packageName]) }
+
+    // In evidenza: i titoli più popolari dei tuoi servizi, alternati.
+    val withBackdrop = rows.take(3).map { row -> row.titles.filter { it.backdropUrl != null } to row.app }
+    for (i in 0 until 2) {
+        for ((titles, app) in withBackdrop) {
+            if (out.size >= 6) break
+            titles.getOrNull(i)?.let { out += HeroSlide.Featured(it, app) }
+        }
+    }
+
+    if (out.size < 3) {
+        val pool = favorites.ifEmpty { apps.filter { it.banner != null }.take(5) }
+        pool
+            .filter { app -> media.take(2).none { it.packageName == app.packageName } }
+            .take((5 - out.size).coerceAtLeast(0))
+            .forEach { out += HeroSlide.App(it) }
+    }
     return out
 }
 
@@ -410,48 +501,68 @@ private fun Hero(
 
 @Composable
 private fun HeroPage(slide: HeroSlide, focused: Boolean) {
-    val media = slide as? HeroSlide.Media
-    val appSlide = slide as? HeroSlide.App
-    val fileArt = rememberFileBitmap(media?.item?.artPath, media?.item?.updatedAt ?: 0L)
-    val art: ImageBitmap? = fileArt ?: media?.app?.banner ?: appSlide?.app?.banner
-    val icon: ImageBitmap? = media?.app?.icon ?: appSlide?.app?.icon
     val color = slide.color
+    val model: Any?
+    val banner: ImageBitmap?
+    val icon: ImageBitmap?
+    val label: String
+    val title: String
+    val subtitle: String
+    val action: String
+    var progress = -1f
 
-    val label = when {
-        media != null && media.item.playing -> "In riproduzione"
-        media != null -> "Continua a guardare"
-        else -> "In evidenza"
+    when (slide) {
+        is HeroSlide.Media -> {
+            model = slide.item.artModel
+            banner = slide.app?.banner
+            icon = slide.app?.icon
+            label = if (slide.item.playing) "In riproduzione" else "Continua a guardare"
+            title = slide.item.title
+            subtitle = listOfNotNull(slide.app?.label, slide.item.subtitle.takeIf { it.isNotBlank() }).joinToString(" · ")
+            action = "Riprendi"
+            if (slide.item.durationMs > 0) progress = slide.item.progress
+        }
+        is HeroSlide.Featured -> {
+            model = slide.title.backdropUrl ?: slide.title.posterUrl
+            banner = null
+            icon = slide.app.icon
+            label = "In evidenza su ${slide.app.label}"
+            title = slide.title.title
+            subtitle = slide.title.metaLine()
+            action = "Dettagli"
+        }
+        is HeroSlide.App -> {
+            model = null
+            banner = slide.app.banner
+            icon = slide.app.icon
+            label = "In evidenza"
+            title = slide.app.label
+            subtitle = "Apri l'app"
+            action = "Apri"
+        }
     }
-    val title = media?.item?.title ?: appSlide?.app?.label.orEmpty()
-    val subtitle = if (media != null) {
-        listOfNotNull(media.app?.label, media.item.subtitle.takeIf { it.isNotBlank() }).joinToString(" · ")
-    } else {
-        "Apri l'app"
-    }
-    val action = if (media != null) "Riprendi" else "Apri"
 
     Box(
         Modifier
             .fillMaxSize()
             .background(Brush.linearGradient(listOf(color, Bg)))
     ) {
-        if (art != null) {
-            Image(
-                art,
-                null,
-                Modifier.fillMaxHeight().fillMaxWidth(0.7f).align(Alignment.CenterEnd),
-                contentScale = ContentScale.Crop,
-            )
-        } else if (icon != null) {
+        val artModifier = Modifier.fillMaxHeight().fillMaxWidth(0.7f).align(Alignment.CenterEnd)
+        if (banner != null) {
+            Image(banner, null, artModifier, contentScale = ContentScale.Crop)
+        } else if (model == null && icon != null) {
             Image(icon, null, Modifier.align(Alignment.CenterEnd).padding(end = 72.dp).size(120.dp))
+        }
+        if (model != null) {
+            AsyncImage(model = model, contentDescription = null, modifier = artModifier, contentScale = ContentScale.Crop)
         }
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to color.darken(0.55f),
-                        0.42f to color.darken(0.55f).copy(alpha = 0.85f),
+                        0f to color.darken(0.6f),
+                        0.42f to color.darken(0.6f).copy(alpha = 0.85f),
                         0.75f to Color.Transparent,
                     )
                 )
@@ -467,6 +578,7 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean) {
                 style = MaterialTheme.typography.labelMedium,
                 color = Color.White.copy(alpha = 0.8f),
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
             )
             Spacer(Modifier.height(6.dp))
             Text(
@@ -486,10 +598,10 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (media != null && media.item.durationMs > 0) {
+            if (progress >= 0f) {
                 Spacer(Modifier.height(10.dp))
                 LinearProgressIndicator(
-                    progress = { media.item.progress },
+                    progress = { progress },
                     modifier = Modifier.width(180.dp).height(4.dp),
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = Color.White.copy(alpha = 0.25f),
@@ -505,12 +617,12 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val fg = if (focused) Color.Black else MaterialTheme.colorScheme.onPrimary
-                Icon(
-                    if (media != null) Icons.Rounded.PlayArrow else Icons.Rounded.Apps,
-                    null,
-                    tint = fg,
-                    modifier = Modifier.size(20.dp),
-                )
+                val actionIcon = when (slide) {
+                    is HeroSlide.Media -> Icons.Rounded.PlayArrow
+                    is HeroSlide.Featured -> Icons.Rounded.Info
+                    is HeroSlide.App -> Icons.Rounded.Apps
+                }
+                Icon(actionIcon, null, tint = fg, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(action, color = fg, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             }
@@ -536,7 +648,12 @@ private fun Dots(count: Int, current: Int, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun AccessHint(onClick: () -> Unit) {
+private fun HintCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    text: String,
+    onClick: () -> Unit,
+) {
     TvCard(
         onClick = onClick,
         modifier = Modifier
@@ -553,14 +670,16 @@ private fun AccessHint(onClick: () -> Unit) {
                 .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.Notifications, null, tint = MaterialTheme.colorScheme.primary)
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(14.dp))
             Column {
-                Text("Attiva \"Continua a guardare\"", color = Color.White, style = MaterialTheme.typography.titleSmall)
+                Text(title, color = Color.White, style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "Concedi l'accesso alle notifiche per vedere qui cosa stavi guardando.",
+                    text,
                     color = Color.White.copy(alpha = 0.7f),
                     style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

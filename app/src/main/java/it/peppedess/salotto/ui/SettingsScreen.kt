@@ -47,7 +47,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.OpenInBrowser
+import androidx.compose.material.icons.rounded.Refresh
 import it.peppedess.salotto.ui.components.PinDialog
+import it.peppedess.salotto.ui.components.TextInputDialog
 import it.peppedess.salotto.ui.components.TvCard
 import it.peppedess.salotto.ui.components.TvIconButton
 import it.peppedess.salotto.ui.theme.Bg
@@ -61,6 +65,8 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit) {
     val owner by vm.deviceOwner.collectAsStateWithLifecycle()
     var message by remember { mutableStateOf<String?>(null) }
     var pinDialog by remember { mutableStateOf(false) }
+    var tmdbDialog by remember { mutableStateOf(false) }
+    val catalogStatus by vm.catalogStatus.collectAsStateWithLifecycle()
 
     val version = remember {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
@@ -150,6 +156,49 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit) {
                 )
             }
 
+            item { SectionTitle("Film e serie (TMDB)") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Key,
+                    title = "Chiave TMDB",
+                    subtitle = if (settings.tmdbKey.isBlank()) {
+                        "Non impostata: serve per locandine e righe \"Popolari su…\""
+                    } else {
+                        catalogStatus.ifBlank { "Impostata" }
+                    },
+                    onClick = { tmdbDialog = true },
+                )
+            }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.OpenInBrowser,
+                    title = "Ottieni una chiave gratuita",
+                    subtitle = "themoviedb.org → Impostazioni → API (va bene la chiave o il token di lettura)",
+                    onClick = { vm.openUrl("https://www.themoviedb.org/settings/api") },
+                )
+            }
+            if (settings.tmdbKey.isNotBlank()) {
+                item {
+                    SettingRow(
+                        icon = Icons.Rounded.Refresh,
+                        title = "Aggiorna locandine e righe",
+                        subtitle = "Ricarica i titoli popolari e cerca di nuovo le locandine",
+                        onClick = {
+                            vm.refreshCatalog()
+                            message = "Aggiornamento avviato."
+                        },
+                    )
+                }
+            }
+            item {
+                Text(
+                    "Questo prodotto usa le API di TMDB ma non è approvato né certificato da TMDB.",
+                    color = Color.White.copy(alpha = 0.4f),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
+
             item { SectionTitle("Kiosk") }
             item {
                 SettingRow(
@@ -224,6 +273,21 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit) {
                 )
             }
         }
+    }
+
+    if (tmdbDialog) {
+        TextInputDialog(
+            title = "Chiave TMDB",
+            label = "Chiave API o token di lettura",
+            initial = settings.tmdbKey,
+            help = "Incollala da themoviedb.org. Lascia vuoto per disattivare.",
+            onConfirm = { key ->
+                vm.updateSettings { s -> s.copy(tmdbKey = key.trim()) }
+                message = if (key.isBlank()) "Chiave TMDB rimossa." else "Chiave salvata, carico i titoli…"
+                tmdbDialog = false
+            },
+            onDismiss = { tmdbDialog = false },
+        )
     }
 
     if (pinDialog) {

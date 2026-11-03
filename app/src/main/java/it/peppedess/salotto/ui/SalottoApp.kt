@@ -35,7 +35,7 @@ import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.ui.components.MenuEntry
 import it.peppedess.salotto.ui.components.PinDialog
 
-enum class Screen { Home, Search, Settings }
+enum class Screen { Home, Search, Settings, Detail }
 
 @Composable
 fun SalottoApp(vm: HomeViewModel) {
@@ -44,6 +44,7 @@ fun SalottoApp(vm: HomeViewModel) {
     var pinPrompt by remember { mutableStateOf(false) }
     var pinError by remember { mutableStateOf(false) }
     var menuApp by remember { mutableStateOf<AppEntry?>(null) }
+    var detailReturn by rememberSaveable { mutableStateOf(Screen.Home) }
 
     val settings by vm.settings.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
@@ -78,17 +79,33 @@ fun SalottoApp(vm: HomeViewModel) {
                 },
                 onSettings = openSettings,
                 onAppMenu = { menuApp = it },
+                onOpenTitle = { title, app ->
+                    vm.openDetail(title, app)
+                    detailReturn = Screen.Home
+                    screen = Screen.Detail
+                },
             )
 
             Screen.Search -> SearchScreen(
                 vm = vm,
                 startWithVoice = searchWithVoice,
                 onClose = { screen = Screen.Home },
+                onOpenTitle = { title ->
+                    vm.openDetail(title, null)
+                    searchWithVoice = false
+                    detailReturn = Screen.Search
+                    screen = Screen.Detail
+                },
             )
 
             Screen.Settings -> SettingsScreen(
                 vm = vm,
                 onClose = { screen = Screen.Home },
+            )
+
+            Screen.Detail -> DetailScreen(
+                vm = vm,
+                onClose = { screen = detailReturn },
             )
         }
     }

@@ -46,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -56,11 +57,14 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import coil3.compose.AsyncImage
 import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.ContinueItem
+import it.peppedess.salotto.data.TmdbTitle
 import kotlinx.coroutines.delay
 
 /**
@@ -129,10 +133,10 @@ fun TvCard(
 }
 
 @Composable
-fun ShelfRow(title: String, order: Int, content: LazyListScope.() -> Unit) {
+fun ShelfRow(title: String, order: Int, icon: ImageBitmap? = null, content: LazyListScope.() -> Unit) {
     val appear = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        delay(order * 70L)
+        delay(order.coerceAtMost(8) * 70L)
         appear.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessLow))
     }
     Column(
@@ -143,13 +147,21 @@ fun ShelfRow(title: String, order: Int, content: LazyListScope.() -> Unit) {
                 translationY = (1f - appear.value) * 80f
             }
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White,
-            modifier = Modifier.padding(start = 40.dp, top = 14.dp),
-        )
+        Row(
+            Modifier.padding(start = 40.dp, top = 14.dp, end = 40.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Image(icon, null, Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)))
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+            )
+        }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 40.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -207,19 +219,25 @@ fun ContinueCard(
     onMenu: () -> Unit,
     onFocus: (Color) -> Unit,
 ) {
-    val art = rememberFileBitmap(item.artPath, item.updatedAt)
     val tint = app?.color ?: Color(0xFF2B3445)
     TvCard(
         onClick = onClick,
-        modifier = Modifier.width(210.dp).aspectRatio(16f / 9f),
+        modifier = Modifier.width(220.dp).aspectRatio(16f / 9f),
         onFocus = { onFocus(tint) },
         onMenu = onMenu,
     ) {
         Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(tint, tint.darken(0.5f)))))
-        if (art != null) {
-            Image(art, item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        } else if (app != null) {
+        if (app != null) {
             Image(app.icon, null, Modifier.size(44.dp).align(Alignment.Center))
+        }
+        val model = item.artModel
+        if (model != null) {
+            AsyncImage(
+                model = model,
+                contentDescription = item.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
         }
         Box(
             Modifier
@@ -277,6 +295,47 @@ fun ContinueCard(
                     trackColor = Color.White.copy(alpha = 0.25f),
                 )
             }
+        }
+    }
+}
+
+/** Locandina verticale di un film o una serie. */
+@Composable
+fun PosterCard(
+    title: TmdbTitle,
+    tint: Color,
+    onClick: () -> Unit,
+    onFocus: (Color) -> Unit,
+) {
+    TvCard(
+        onClick = onClick,
+        modifier = Modifier.width(118.dp).aspectRatio(2f / 3f),
+        shape = RoundedCornerShape(14.dp),
+        onFocus = { onFocus(tint) },
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Brush.linearGradient(listOf(tint, tint.darken(0.6f)))),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = title.title,
+                style = MaterialTheme.typography.labelLarge,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(10.dp),
+            )
+        }
+        if (title.posterUrl != null) {
+            AsyncImage(
+                model = title.posterUrl,
+                contentDescription = title.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
         }
     }
 }
@@ -342,7 +401,7 @@ fun TvPill(
                 Icon(icon, null, tint = fg, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
             }
-            Text(text, color = fg, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+            Text(text, color = fg, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium, maxLines = 1)
         }
     }
 }

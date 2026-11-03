@@ -64,6 +64,33 @@ fun Clock(modifier: Modifier = Modifier) {
 }
 
 @Composable
+fun TextInputDialog(
+    title: String,
+    label: String,
+    initial: String,
+    help: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var value by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = value,
+                onValueChange = { v -> value = v.trim() },
+                singleLine = true,
+                label = { Text(label) },
+                supportingText = { Text(help) },
+            )
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(value) }) { Text("Salva") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
+    )
+}
+
+@Composable
 fun PinDialog(
     title: String,
     confirmLabel: String,

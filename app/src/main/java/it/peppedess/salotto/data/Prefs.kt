@@ -11,10 +11,12 @@ data class Settings(
     val allowPortrait: Boolean = false,
     val kiosk: Boolean = false,
     val pin: String = "",
+    val tmdbKey: String = "",
 )
 
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("salotto", Context.MODE_PRIVATE)
+    private val artCache = context.getSharedPreferences("tmdb_art", Context.MODE_PRIVATE)
 
     private val _settings = MutableStateFlow(readSettings())
     val settings: StateFlow<Settings> = _settings.asStateFlow()
@@ -32,6 +34,7 @@ class Prefs(context: Context) {
             putBoolean(KEY_PORTRAIT, s.allowPortrait)
             putBoolean(KEY_KIOSK, s.kiosk)
             putString(KEY_PIN, s.pin)
+            putString(KEY_TMDB, s.tmdbKey)
         }
         _settings.value = s
     }
@@ -45,11 +48,26 @@ class Prefs(context: Context) {
         _favorites.value = clean
     }
 
+    /** null = mai cercato, "" = cercato senza risultati, altrimenti l'URL dell'immagine. */
+    fun cachedArt(query: String): String? {
+        val k = query.lowercase()
+        return if (artCache.contains(k)) artCache.getString(k, "").orEmpty() else null
+    }
+
+    fun cacheArt(query: String, url: String) {
+        artCache.edit { putString(query.lowercase(), url) }
+    }
+
+    fun clearArtCache() {
+        artCache.edit { clear() }
+    }
+
     private fun readSettings(): Settings = Settings(
         keepScreenOn = sp.getBoolean(KEY_SCREEN_ON, true),
         allowPortrait = sp.getBoolean(KEY_PORTRAIT, false),
         kiosk = sp.getBoolean(KEY_KIOSK, false),
         pin = sp.getString(KEY_PIN, "").orEmpty(),
+        tmdbKey = sp.getString(KEY_TMDB, "").orEmpty(),
     )
 
     private fun readFavorites(): List<String> =
@@ -60,6 +78,7 @@ class Prefs(context: Context) {
         const val KEY_PORTRAIT = "allow_portrait"
         const val KEY_KIOSK = "kiosk"
         const val KEY_PIN = "pin"
+        const val KEY_TMDB = "tmdb_key"
         const val KEY_FAVORITES = "favorites"
         const val KEY_FAV_INIT = "favorites_init"
     }
