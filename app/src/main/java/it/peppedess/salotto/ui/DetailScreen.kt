@@ -1,6 +1,15 @@
 package it.peppedess.salotto.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -57,6 +66,10 @@ fun DetailScreen(vm: HomeViewModel, onClose: () -> Unit) {
     }
     val title = detail.title
     val tint = detail.apps.firstOrNull()?.color ?: DefaultAmbient
+    val context = LocalContext.current
+    val myList by vm.myList.collectAsStateWithLifecycle()
+    val inList = myList.any { it.key == title.key }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     Box(
         Modifier
@@ -153,6 +166,20 @@ fun DetailScreen(vm: HomeViewModel, onClose: () -> Unit) {
                         onClick = { vm.watchIn(title, app) },
                     )
                 }
+                TvPill(
+                    text = if (inList) "Nella mia lista" else "La mia lista",
+                    icon = if (inList) Icons.Rounded.Check else Icons.Rounded.Add,
+                    selected = inList,
+                    onClick = {
+                        val added = vm.toggleMyList(title)
+                        if (added && title.type == "tv" && Build.VERSION.SDK_INT >= 33 &&
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                            PackageManager.PERMISSION_GRANTED
+                        ) {
+                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    },
+                )
                 TvPill(
                     text = "Trailer",
                     icon = Icons.Rounded.SmartDisplay,

@@ -12,6 +12,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -43,8 +45,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Movie
@@ -52,6 +57,8 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -63,6 +70,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -79,7 +87,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,8 +99,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import it.peppedess.salotto.data.AppEntry
+import it.peppedess.salotto.data.ChannelGuide
 import it.peppedess.salotto.data.ContinueItem
+import it.peppedess.salotto.data.EpisodeInfo
 import it.peppedess.salotto.data.HaEntity
+import it.peppedess.salotto.data.Playlist
+import it.peppedess.salotto.data.Profile
 import it.peppedess.salotto.data.TmdbTitle
 import it.peppedess.salotto.data.Weather
 import it.peppedess.salotto.ui.components.AppCard
@@ -141,6 +155,28 @@ fun TmdbTitle.metaLine(): String = listOfNotNull(
     if (rating > 0) "★ " + String.format(Locale.ITALIAN, "%.1f", rating) else null,
 ).joinToString(" · ")
 
+/** Dati di tutte le righe della home, raccolti in un solo oggetto. */
+private data class HomeData(
+    val apps: List<AppEntry>,
+    val favorites: List<AppEntry>,
+    val media: List<ContinueItem>,
+    val rows: List<ProviderRow>,
+    val trending: List<TmdbTitle>,
+    val haTiles: List<HaEntity>,
+    val myList: List<TmdbTitle>,
+    val episodes: List<EpisodeInfo>,
+    val recommendations: List<Pair<TmdbTitle, List<TmdbTitle>>>,
+    val live: List<ChannelGuide>,
+    val playlists: List<Playlist>,
+    val speakers: List<HaEntity>,
+    val byPkg: Map<String, AppEntry>,
+    val access: Boolean,
+    val loading: Boolean,
+    val showTmdbHint: Boolean,
+    val updateBuild: Int?,
+    val sleepEndsAt: Long,
+)
+
 @Composable
 fun HomeScreen(
     vm: HomeViewModel,
@@ -148,7 +184,11 @@ fun HomeScreen(
     onSettings: () -> Unit,
     onAppMenu: (AppEntry) -> Unit,
     onOpenTitle: (TmdbTitle, AppEntry?) -> Unit,
+    onAssistant: () -> Unit,
+    onStats: () -> Unit,
+    onProfiles: () -> Unit,
 ) {
+    val profile by vm.profile.collectAsStateWithLifecycle()
     val apps by vm.apps.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val media by vm.continueItems.collectAsStateWithLifecycle()
@@ -160,23 +200,60 @@ fun HomeScreen(
     val settings by vm.settings.collectAsStateWithLifecycle()
     val haTiles by vm.haTiles.collectAsStateWithLifecycle()
     val weather by vm.weather.collectAsStateWithLifecycle()
+    val myList by vm.myList.collectAsStateWithLifecycle()
+    val episodes by vm.newEpisodes.collectAsStateWithLifecycle()
+    val recommendations by vm.recommendations.collectAsStateWithLifecycle()
+    val live by vm.liveGuide.collectAsStateWithLifecycle()
+    val playlists by vm.playlists.collectAsStateWithLifecycle()
+    val speakers by vm.speakers.collectAsStateWithLifecycle()
+    val nowPlaying by vm.nowPlaying.collectAsStateWithLifecycle()
+    val sleepEndsAt by vm.sleepEndsAt.collectAsStateWithLifecycle()
+    val adminActive by vm.adminActive.collectAsStateWithLifecycle()
+    val update by vm.update.collectAsStateWithLifecycle()
+    val kidsRemaining by vm.kidsRemaining.collectAsStateWithLifecycle()
 
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var ambientTarget by remember { mutableStateOf(DefaultAmbient) }
     val ambient by animateColorAsState(ambientTarget, tween(700), label = "ambient")
     var ambientArt by remember { mutableStateOf<Any?>(null) }
     var menuItem by remember { mutableStateOf<ContinueItem?>(null) }
+    var channelMenu by remember { mutableStateOf<ChannelGuide?>(null) }
+    var playlistMenu by remember { mutableStateOf<Playlist?>(null) }
+    var showAudio by remember { mutableStateOf(false) }
+    var showSleep by remember { mutableStateOf(false) }
+    var showCastHelp by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
 
     LaunchedEffect(homeTick) {
         tab = 0
-        listState.scrollToItem(0)
+        runCatching { listState.scrollToItem(0) }
     }
 
     val byPkg = remember(apps) { apps.associateBy { it.packageName } }
     val setAmbient: (Color) -> Unit = { ambientTarget = it }
     val setArt: (Any?) -> Unit = { if (it != null) ambientArt = it }
+
+    val data = HomeData(
+        apps = apps,
+        favorites = favorites,
+        media = media,
+        rows = rows,
+        trending = trending,
+        haTiles = haTiles,
+        myList = myList,
+        episodes = episodes,
+        recommendations = recommendations,
+        live = if (settings.liveTv) live else emptyList(),
+        playlists = playlists,
+        speakers = speakers,
+        byPkg = byPkg,
+        access = access,
+        loading = loading,
+        showTmdbHint = settings.tmdbKey.isBlank(),
+        updateBuild = update?.build,
+        sleepEndsAt = sleepEndsAt,
+    )
 
     Box(
         Modifier
@@ -214,40 +291,80 @@ fun HomeScreen(
 
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
             AnimatedVisibility(
-                visible = !scrolled || tab != 0,
+                visible = !scrolled || tab != 0 || profile.kids,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut(),
             ) {
-                TopBar(tab = tab, weather = weather, onTab = { tab = it }, onSearch = onSearch, onSettings = onSettings)
+                TopBar(
+                    tab = tab,
+                    profile = profile,
+                    weather = weather,
+                    sleepEndsAt = sleepEndsAt,
+                    kidsRemaining = kidsRemaining,
+                    onTab = { tab = it },
+                    onSearch = onSearch,
+                    onSettings = onSettings,
+                    onAssistant = onAssistant,
+                    onProfiles = onProfiles,
+                    onSleep = { showSleep = true },
+                )
             }
-            Crossfade(targetState = tab, label = "tab") { current ->
-                if (current == 0) {
-                    ForYou(
-                        listState = listState,
-                        apps = apps,
-                        favorites = favorites,
-                        media = media,
-                        rows = rows,
-                        trending = trending,
-                        haTiles = haTiles,
-                        byPkg = byPkg,
-                        access = access,
-                        loading = loading,
-                        showTmdbHint = settings.tmdbKey.isBlank(),
-                        onAmbient = setAmbient,
-                        onArt = setArt,
-                        onLaunch = vm::launch,
-                        onResume = vm::resume,
-                        onAppMenu = onAppMenu,
-                        onMediaMenu = { menuItem = it },
-                        onOpenTitle = onOpenTitle,
-                        onHaPress = vm::haPress,
-                        onEnableAccess = { vm.openNotificationAccess() },
-                        onTmdbHint = onSettings,
-                    )
-                } else {
-                    AllApps(apps = apps, onAmbient = setAmbient, onLaunch = vm::launch, onAppMenu = onAppMenu)
+            if (profile.kids) {
+                KidsHome(profile = profile, apps = apps, onLaunch = vm::launch)
+            } else {
+                Crossfade(targetState = tab, label = "tab") { current ->
+                    if (current == 0) {
+                        ForYou(
+                            listState = listState,
+                            data = data,
+                            onAmbient = setAmbient,
+                            onArt = setArt,
+                            onLaunch = vm::launch,
+                            onResume = vm::resume,
+                            onAppMenu = onAppMenu,
+                            onMediaMenu = { menuItem = it },
+                            onOpenTitle = onOpenTitle,
+                            onHaPress = vm::haPress,
+                            onEnableAccess = { vm.openNotificationAccess() },
+                            onTmdbHint = onSettings,
+                            onOpenLive = { vm.openLive(it.channel) },
+                            onChannelMenu = { channelMenu = it },
+                            onPlaylist = { playlistMenu = it },
+                            onInstallUpdate = { vm.installUpdate() },
+                            onAssistant = onAssistant,
+                            onSleep = { showSleep = true },
+                            onAudio = { showAudio = true },
+                            onStats = onStats,
+                            onCast = {
+                                if (!vm.openCastReceiver()) {
+                                    showCastHelp = true
+                                }
+                            },
+                        )
+                    } else {
+                        AllApps(apps = apps, onAmbient = setAmbient, onLaunch = vm::launch, onAppMenu = onAppMenu)
+                    }
                 }
+            }
+        }
+
+        val np = nowPlaying
+        AnimatedVisibility(
+            visible = np != null && !profile.kids,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 14.dp),
+        ) {
+            if (np != null) {
+                NowPlayingBar(
+                    nowPlaying = np,
+                    app = byPkg[np.packageName],
+                    onCommand = vm::mediaCommand,
+                    onOpen = vm::openNowPlayingApp,
+                    onAudio = { showAudio = true },
+                )
             }
         }
     }
@@ -275,16 +392,83 @@ fun HomeScreen(
             },
         )
     }
+    channelMenu?.let { guide ->
+        ChannelDialog(
+            guide = guide,
+            onWatch = {
+                vm.openLive(guide.channel)
+                channelMenu = null
+            },
+            onDismiss = { channelMenu = null },
+        )
+    }
+    playlistMenu?.let { playlist ->
+        PlaylistDialog(
+            playlist = playlist,
+            speakers = speakers,
+            onPick = { speaker ->
+                vm.playPlaylist(playlist, speaker)
+                playlistMenu = null
+            },
+            onDismiss = { playlistMenu = null },
+        )
+    }
+    if (showAudio) {
+        AudioDialog(vm = vm, speakers = speakers, onDismiss = { showAudio = false })
+    }
+    if (showSleep) {
+        SleepDialog(
+            endsAt = sleepEndsAt,
+            adminActive = adminActive,
+            onStart = vm::startSleepTimer,
+            onCancel = vm::cancelSleepTimer,
+            onEnableAdmin = vm::requestDeviceAdmin,
+            onDismiss = { showSleep = false },
+        )
+    }
+    if (showCastHelp) {
+        AlertDialog(
+            onDismissRequest = { showCastHelp = false },
+            icon = { Icon(Icons.Rounded.Cast, null) },
+            title = { Text("Proietta su Salotto") },
+            text = {
+                Text(
+                    "Non ho trovato un ricevitore installato. Ti consiglio AirScreen: riceve Google Cast, AirPlay e Miracast. " +
+                        "Dopo averlo installato, questo pulsante lo apre direttamente."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.searchPlayStore("AirScreen")
+                    showCastHelp = false
+                }) { Text("Apri il Play Store") }
+            },
+            dismissButton = { TextButton(onClick = { showCastHelp = false }) { Text("Chiudi") } },
+        )
+    }
 }
 
 @Composable
 private fun TopBar(
     tab: Int,
+    profile: Profile,
     weather: Weather?,
+    sleepEndsAt: Long,
+    kidsRemaining: Int?,
     onTab: (Int) -> Unit,
     onSearch: (Boolean) -> Unit,
     onSettings: () -> Unit,
+    onAssistant: () -> Unit,
+    onProfiles: () -> Unit,
+    onSleep: () -> Unit,
 ) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(sleepEndsAt) {
+        while (sleepEndsAt > 0) {
+            now = System.currentTimeMillis()
+            delay(15_000)
+        }
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -292,37 +476,81 @@ private fun TopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        TvCard(onClick = onProfiles, modifier = Modifier.size(44.dp), shape = CircleShape, focusScale = 1.12f) {
+            ProfileAvatar(profile, 44)
+        }
         Text(
-            text = "Salotto",
+            text = if (profile.kids) "Ciao ${profile.name}!" else "Salotto",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             color = Color.White,
             modifier = Modifier.padding(end = 10.dp),
         )
-        TvPill(text = "Per te", onClick = { onTab(0) }, selected = tab == 0)
-        TvPill(text = "App", onClick = { onTab(1) }, selected = tab == 1)
+        if (!profile.kids) {
+            TvPill(text = "Per te", onClick = { onTab(0) }, selected = tab == 0)
+            TvPill(text = "App", onClick = { onTab(1) }, selected = tab == 1)
+        }
         Spacer(Modifier.weight(1f))
-        TvPill(text = "Cerca", icon = Icons.Rounded.Search, onClick = { onSearch(false) })
-        TvIconButton(Icons.Rounded.Mic, "Ricerca vocale", onClick = { onSearch(true) })
+        if (kidsRemaining != null) {
+            Text(
+                text = "Tempo rimasto: ${kidsRemaining / 60} min",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (kidsRemaining < 600) Color(0xFFFFB74D) else Color.White,
+            )
+        }
+        if (!profile.kids) {
+            if (sleepEndsAt > now) {
+                TvPill(
+                    text = "${((sleepEndsAt - now) / 60_000L) + 1} min",
+                    icon = Icons.Rounded.Bedtime,
+                    onClick = onSleep,
+                )
+            }
+            TvPill(text = "Cerca", icon = Icons.Rounded.Search, onClick = { onSearch(false) })
+            TvIconButton(Icons.Rounded.Mic, "Ricerca vocale", onClick = { onSearch(true) })
+            TvIconButton(Icons.Rounded.AutoAwesome, "Assistente", onClick = onAssistant)
+        }
         WeatherChip(weather, Modifier.padding(start = 8.dp))
         Clock(Modifier.padding(horizontal = 8.dp))
-        TvIconButton(Icons.Rounded.Settings, "Impostazioni", onClick = onSettings)
+        if (!profile.kids) {
+            TvIconButton(Icons.Rounded.Settings, "Impostazioni", onClick = onSettings)
+        }
+    }
+}
+
+@Composable
+private fun KidsHome(profile: Profile, apps: List<AppEntry>, onLaunch: (AppEntry) -> Unit) {
+    val allowed = remember(profile, apps) {
+        val byPkg = apps.associateBy { it.packageName }
+        profile.allowedApps.mapNotNull { byPkg[it] }
+    }
+    if (allowed.isEmpty()) {
+        Box(Modifier.fillMaxSize().padding(40.dp), contentAlignment = Alignment.Center) {
+            Text(
+                "Nessuna app scelta per questo profilo. Chiedi a un adulto di sceglierle in Impostazioni → Profili.",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+            )
+        }
+        return
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(200.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = 20.dp, bottom = 40.dp),
+        horizontalArrangement = Arrangement.spacedBy(22.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
+    ) {
+        items(allowed, key = { it.key }) { app ->
+            KidsAppCard(app) { onLaunch(app) }
+        }
     }
 }
 
 @Composable
 private fun ForYou(
     listState: LazyListState,
-    apps: List<AppEntry>,
-    favorites: List<AppEntry>,
-    media: List<ContinueItem>,
-    rows: List<ProviderRow>,
-    trending: List<TmdbTitle>,
-    haTiles: List<HaEntity>,
-    byPkg: Map<String, AppEntry>,
-    access: Boolean,
-    loading: Boolean,
-    showTmdbHint: Boolean,
+    data: HomeData,
     onAmbient: (Color) -> Unit,
     onArt: (Any?) -> Unit,
     onLaunch: (AppEntry) -> Unit,
@@ -333,23 +561,46 @@ private fun ForYou(
     onHaPress: (HaEntity) -> Unit,
     onEnableAccess: () -> Unit,
     onTmdbHint: () -> Unit,
+    onOpenLive: (ChannelGuide) -> Unit,
+    onChannelMenu: (ChannelGuide) -> Unit,
+    onPlaylist: (Playlist) -> Unit,
+    onInstallUpdate: () -> Unit,
+    onAssistant: () -> Unit,
+    onSleep: () -> Unit,
+    onAudio: () -> Unit,
+    onStats: () -> Unit,
+    onCast: () -> Unit,
 ) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            now = System.currentTimeMillis()
+        }
+    }
+    val titleFocus: (TmdbTitle) -> (Color) -> Unit = { t ->
+        { c ->
+            onAmbient(c)
+            onArt(t.backdropUrl ?: t.posterUrl)
+        }
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val heroHeight = (maxHeight * 0.64f).coerceIn(180.dp, 460.dp)
-        val slides = remember(media, rows, favorites, apps, byPkg) {
-            buildSlides(media, rows, favorites, apps, byPkg)
+        val slides = remember(data.media, data.rows, data.favorites, data.apps, data.byPkg) {
+            buildSlides(data.media, data.rows, data.favorites, data.apps, data.byPkg)
         }
-
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 40.dp),
+            contentPadding = PaddingValues(bottom = 110.dp),
         ) {
+            var order = 1
             item(key = "hero") {
                 Hero(
                     slides = slides,
                     height = heroHeight,
-                    loading = loading,
+                    loading = data.loading,
                     onAmbient = { slide ->
                         onAmbient(slide.color)
                         onArt(slide.art)
@@ -363,13 +614,24 @@ private fun ForYou(
                     },
                 )
             }
-            if (media.isNotEmpty()) {
+            data.updateBuild?.let { build ->
+                item(key = "update") {
+                    HintCard(
+                        icon = Icons.Rounded.SystemUpdate,
+                        title = "Aggiornamento disponibile: build $build",
+                        text = "Tocca per scaricarlo e installarlo.",
+                        onClick = onInstallUpdate,
+                    )
+                }
+            }
+            if (data.media.isNotEmpty()) {
+                val o = order++
                 item(key = "continue") {
-                    ShelfRow("Continua a guardare", 1) {
-                        items(media, key = { it.id }) { entry ->
+                    ShelfRow("Continua a guardare", o) {
+                        items(data.media, key = { it.id }) { entry ->
                             ContinueCard(
                                 item = entry,
-                                app = byPkg[entry.packageName],
+                                app = data.byPkg[entry.packageName],
                                 onClick = { onResume(entry) },
                                 onMenu = { onMediaMenu(entry) },
                                 onFocus = { c ->
@@ -380,7 +642,7 @@ private fun ForYou(
                         }
                     }
                 }
-            } else if (!access) {
+            } else if (!data.access) {
                 item(key = "access") {
                     HintCard(
                         icon = Icons.Rounded.Notifications,
@@ -390,10 +652,25 @@ private fun ForYou(
                     )
                 }
             }
-            if (favorites.isNotEmpty()) {
+            if (data.episodes.isNotEmpty()) {
+                val o = order++
+                item(key = "episodes") {
+                    ShelfRow("Nuovi episodi", o) {
+                        items(data.episodes, key = { it.series.key + it.code }) { ep ->
+                            EpisodeCard(
+                                episode = ep,
+                                onClick = { onOpenTitle(ep.series, null) },
+                                onFocus = titleFocus(ep.series),
+                            )
+                        }
+                    }
+                }
+            }
+            if (data.favorites.isNotEmpty()) {
+                val o = order++
                 item(key = "favorites") {
-                    ShelfRow("Preferite", 2) {
-                        items(favorites, key = { it.key }) { app ->
+                    ShelfRow("Preferite", o) {
+                        items(data.favorites, key = { it.key }) { app ->
                             AppCard(
                                 app = app,
                                 onClick = { onLaunch(app) },
@@ -405,54 +682,86 @@ private fun ForYou(
                     }
                 }
             }
-            if (haTiles.isNotEmpty()) {
-                item(key = "home") {
-                    ShelfRow("Casa", 3) {
-                        items(haTiles, key = { it.id }) { entity ->
-                            HaTile(
-                                entity = entity,
-                                onClick = { onHaPress(entity) },
+            if (data.myList.isNotEmpty()) {
+                val o = order++
+                item(key = "mylist") {
+                    ShelfRow("La mia lista", o) {
+                        items(data.myList, key = { it.key }) { t ->
+                            PosterCard(t, DefaultAmbient, onClick = { onOpenTitle(t, null) }, onFocus = titleFocus(t))
+                        }
+                    }
+                }
+            }
+            if (data.live.isNotEmpty()) {
+                val o = order++
+                item(key = "live") {
+                    ShelfRow("In onda ora", o) {
+                        items(data.live, key = { it.channel.number }) { guide ->
+                            LiveCard(
+                                guide = guide,
+                                now = now,
+                                onClick = { onOpenLive(guide) },
+                                onMenu = { onChannelMenu(guide) },
                                 onFocus = onAmbient,
                             )
                         }
                     }
                 }
             }
-            rows.forEachIndexed { index, row ->
+            if (data.haTiles.isNotEmpty()) {
+                val o = order++
+                item(key = "home") {
+                    ShelfRow("Casa", o) {
+                        items(data.haTiles, key = { it.id }) { entity ->
+                            HaTile(entity = entity, onClick = { onHaPress(entity) }, onFocus = onAmbient)
+                        }
+                    }
+                }
+            }
+            data.rows.forEach { row ->
+                val o = order++
                 item(key = "row:" + row.app.packageName) {
-                    ShelfRow("Popolari su ${row.app.label}", 4 + index, icon = row.app.icon) {
+                    ShelfRow("Popolari su ${row.app.label}", o, icon = row.app.icon) {
                         items(row.titles, key = { it.key }) { t ->
-                            PosterCard(
-                                title = t,
-                                tint = row.app.color,
-                                onClick = { onOpenTitle(t, row.app) },
-                                onFocus = { c ->
-                                    onAmbient(c)
-                                    onArt(t.backdropUrl ?: t.posterUrl)
-                                },
-                            )
+                            PosterCard(t, row.app.color, onClick = { onOpenTitle(t, row.app) }, onFocus = titleFocus(t))
                         }
                     }
                 }
             }
-            if (trending.isNotEmpty()) {
+            data.recommendations.forEach { (seed, titles) ->
+                val o = order++
+                item(key = "rec:" + seed.key) {
+                    ShelfRow("Perché ti interessa «${seed.title}»", o) {
+                        items(titles, key = { it.key }) { t ->
+                            PosterCard(t, DefaultAmbient, onClick = { onOpenTitle(t, null) }, onFocus = titleFocus(t))
+                        }
+                    }
+                }
+            }
+            if (data.speakers.isNotEmpty() || data.playlists.isNotEmpty()) {
+                val o = order++
+                item(key = "music") {
+                    ShelfRow("Musica", o) {
+                        items(data.speakers, key = { "spk:" + it.id }) { speaker ->
+                            HaTile(entity = speaker, onClick = { onHaPress(speaker) }, onFocus = onAmbient)
+                        }
+                        items(data.playlists, key = { "pl:" + it.id }) { playlist ->
+                            PlaylistCard(playlist = playlist, onClick = { onPlaylist(playlist) }, onFocus = onAmbient)
+                        }
+                    }
+                }
+            }
+            if (data.trending.isNotEmpty()) {
+                val o = order++
                 item(key = "trending") {
-                    ShelfRow("Di tendenza questa settimana", 4 + rows.size) {
-                        items(trending, key = { it.key }) { t ->
-                            PosterCard(
-                                title = t,
-                                tint = DefaultAmbient,
-                                onClick = { onOpenTitle(t, null) },
-                                onFocus = { c ->
-                                    onAmbient(c)
-                                    onArt(t.backdropUrl ?: t.posterUrl)
-                                },
-                            )
+                    ShelfRow("Di tendenza questa settimana", o) {
+                        items(data.trending, key = { it.key }) { t ->
+                            PosterCard(t, DefaultAmbient, onClick = { onOpenTitle(t, null) }, onFocus = titleFocus(t))
                         }
                     }
                 }
             }
-            if (showTmdbHint) {
+            if (data.showTmdbHint) {
                 item(key = "tmdb") {
                     HintCard(
                         icon = Icons.Rounded.Movie,
@@ -462,10 +771,40 @@ private fun ForYou(
                     )
                 }
             }
-            if (apps.isNotEmpty()) {
+            run {
+                val o = order++
+                item(key = "tools") {
+                    ShelfRow("Strumenti", o) {
+                        item(key = "t-ai") {
+                            ToolCard(Icons.Rounded.AutoAwesome, "Assistente", "Chiedi cosa guardare", Color(0xFF7C4DFF), onAssistant, onAmbient)
+                        }
+                        item(key = "t-sleep") {
+                            ToolCard(
+                                Icons.Rounded.Bedtime,
+                                "Timer",
+                                if (data.sleepEndsAt > now) "Attivo" else "Spegnimento",
+                                Color(0xFF3949AB),
+                                onSleep,
+                                onAmbient,
+                            )
+                        }
+                        item(key = "t-audio") {
+                            ToolCard(Icons.Rounded.Tune, "Audio", "Volume e uscita", Color(0xFF00897B), onAudio, onAmbient)
+                        }
+                        item(key = "t-cast") {
+                            ToolCard(Icons.Rounded.Cast, "Proietta", "Ricevitore Cast", Color(0xFFEF6C00), onCast, onAmbient)
+                        }
+                        item(key = "t-stats") {
+                            ToolCard(Icons.Rounded.BarChart, "Statistiche", "Ore di visione", Color(0xFF546E7A), onStats, onAmbient)
+                        }
+                    }
+                }
+            }
+            if (data.apps.isNotEmpty()) {
+                val o = order++
                 item(key = "apps") {
-                    ShelfRow("Le tue app", 5 + rows.size) {
-                        items(apps, key = { it.key }) { app ->
+                    ShelfRow("Le tue app", o) {
+                        items(data.apps, key = { it.key }) { app ->
                             AppCard(
                                 app = app,
                                 onClick = { onLaunch(app) },
@@ -649,7 +988,7 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean, isCurrent: Boolean) {
             .graphicsLayer {
                 scaleX = zoom
                 scaleY = zoom
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.7f, 0.4f)
+                transformOrigin = TransformOrigin(0.7f, 0.4f)
             }
         when {
             model != null -> AsyncImage(
@@ -765,7 +1104,7 @@ private fun Dots(count: Int, current: Int, modifier: Modifier = Modifier) {
 
 @Composable
 private fun HintCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     title: String,
     text: String,
     onClick: () -> Unit,

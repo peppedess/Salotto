@@ -43,8 +43,11 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(vm.settings, vm.apps, vm.deviceOwner) { s, apps, owner ->
-                    Triple(s, apps.map { it.packageName }.distinct(), owner)
+                combine(vm.settings, vm.apps, vm.deviceOwner, vm.profile) { s, apps, owner, profile ->
+                    // Con un profilo bambini il blocco consente solo le sue app.
+                    val packages = if (profile.kids) profile.allowedApps else apps.map { it.packageName }.distinct()
+                    val effective = if (profile.kids && owner) s.copy(kiosk = true) else s
+                    Triple(effective, packages, owner)
                 }
                     .distinctUntilChanged()
                     .collect { (s, packages, _) -> applySettings(s, packages) }

@@ -25,6 +25,38 @@ import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.AppRepository
 import it.peppedess.salotto.data.ContinueItem
 import it.peppedess.salotto.data.ContinueStore
+import android.app.admin.DevicePolicyManager
+import android.media.AudioManager
+import android.media.MediaRouter2
+import android.os.PowerManager
+import android.view.KeyEvent
+import it.peppedess.salotto.MainActivity
+import it.peppedess.salotto.data.AssistantClient
+import it.peppedess.salotto.data.AssistantException
+import it.peppedess.salotto.data.ChannelGuide
+import it.peppedess.salotto.data.ChatMessage
+import it.peppedess.salotto.data.DeezerClient
+import it.peppedess.salotto.data.EpgRepository
+import it.peppedess.salotto.data.EpisodeInfo
+import it.peppedess.salotto.data.HaAction
+import it.peppedess.salotto.data.Playlist
+import it.peppedess.salotto.data.Profile
+import it.peppedess.salotto.data.StatsRepository
+import it.peppedess.salotto.data.TitleHint
+import it.peppedess.salotto.data.TvChannel
+import it.peppedess.salotto.data.TvChannels
+import it.peppedess.salotto.data.UpdateInfo
+import it.peppedess.salotto.data.Updater
+import it.peppedess.salotto.data.WeekStats
+import it.peppedess.salotto.service.DailyWorker
+import it.peppedess.salotto.service.NowPlaying
+import it.peppedess.salotto.service.SleepTimer
+import kotlinx.coroutines.Dispatchers
+import org.json.JSONObject
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import it.peppedess.salotto.data.HaClient
 import it.peppedess.salotto.data.HaEntity
 import it.peppedess.salotto.data.HaException
@@ -53,6 +85,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+enum class MediaCommand { PlayPause, Next, Previous }
 
 /** Riga "Popolari su …" per un servizio di streaming installato. */
 data class ProviderRow(
@@ -143,6 +177,68 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _screensaver = MutableStateFlow(false)
     val screensaver: StateFlow<Boolean> = _screensaver.asStateFlow()
 
+    // ---- Profili e bambini ----
+    val profiles: StateFlow<List<Profile>> = prefs.profiles
+    val profile: StateFlow<Profile> = prefs.profile
+    private val _kidsRemaining = MutableStateFlow<Int?>(null)
+    /** Secondi rimasti oggi al profilo bambini, null se non c'è limite. */
+    val kidsRemaining: StateFlow<Int?> = _kidsRemaining.asStateFlow()
+    private val _kidsLocked = MutableStateFlow(false)
+    val kidsLocked: StateFlow<Boolean> = _kidsLocked.asStateFlow()
+
+    // ---- La mia lista, nuovi episodi, consigli ----
+    val myList: StateFlow<List<TmdbTitle>> = prefs.myList
+    private val _newEpisodes = MutableStateFlow<List<EpisodeInfo>>(emptyList())
+    val newEpisodes: StateFlow<List<EpisodeInfo>> = _newEpisodes.asStateFlow()
+    private val _recommendations = MutableStateFlow<List<Pair<TmdbTitle, List<TmdbTitle>>>>(emptyList())
+    val recommendations: StateFlow<List<Pair<TmdbTitle, List<TmdbTitle>>>> = _recommendations.asStateFlow()
+
+    // ---- Dirette TV ----
+    private val epg = EpgRepository(app)
+    private val _liveGuide = MutableStateFlow<List<ChannelGuide>>(emptyList())
+    val liveGuide: StateFlow<List<ChannelGuide>> = _liveGuide.asStateFlow()
+    private val _epgStatus = MutableStateFlow("")
+    val epgStatus: StateFlow<String> = _epgStatus.asStateFlow()
+    private val epgTick = MutableStateFlow(0)
+
+    // ---- Musica ----
+    private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
+    val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
+    private val _musicStatus = MutableStateFlow("")
+    val musicStatus: StateFlow<String> = _musicStatus.asStateFlow()
+    val speakers: StateFlow<List<HaEntity>> =
+        combine(_haAll, prefs.settings.map { it.musicSpeakers }.distinctUntilChanged()) { all, ids ->
+            val map = all.associateBy { it.id }
+            ids.mapNotNull { map[it] }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ---- Riproduzione, audio e timer ----
+    val nowPlaying: StateFlow<NowPlaying?> = MediaListenerService.nowPlaying.asStateFlow()
+    val sleepEndsAt: StateFlow<Long> = SleepTimer.endsAt
+    private val _adminActive = MutableStateFlow(false)
+    val adminActive: StateFlow<Boolean> = _adminActive.asStateFlow()
+
+    // ---- Aggiornamenti ----
+    private val _update = MutableStateFlow<UpdateInfo?>(null)
+    val update: StateFlow<UpdateInfo?> = _update.asStateFlow()
+    private val _updateStatus = MutableStateFlow("")
+    val updateStatus: StateFlow<String> = _updateStatus.asStateFlow()
+    private var lastUpdateCheck = 0L
+
+    // ---- Assistente ----
+    private val _chat = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chat: StateFlow<List<ChatMessage>> = _chat.asStateFlow()
+    private val _assistantBusy = MutableStateFlow(false)
+    val assistantBusy: StateFlow<Boolean> = _assistantBusy.asStateFlow()
+    private val _assistantTitles = MutableStateFlow<List<TmdbTitle>>(emptyList())
+    val assistantTitles: StateFlow<List<TmdbTitle>> = _assistantTitles.asStateFlow()
+
+    // ---- Statistiche ----
+    private val _stats = MutableStateFlow<WeekStats?>(null)
+    val stats: StateFlow<WeekStats?> = _stats.asStateFlow()
+    private val _statsPermission = MutableStateFlow(false)
+    val statsPermission: StateFlow<Boolean> = _statsPermission.asStateFlow()
+
     private val packageCallback = object : LauncherApps.Callback() {
         override fun onPackageRemoved(packageName: String?, user: UserHandle?) = scheduleReload()
         override fun onPackageAdded(packageName: String?, user: UserHandle?) = scheduleReload()
@@ -210,6 +306,87 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
+        SleepTimer.load(app)
+        DailyWorker.schedule(app)
+
+        // Righe personali: nuovi episodi e consigli, da La mia lista e dai titoli aperti.
+        viewModelScope.launch {
+            combine(
+                prefs.settings.map { it.tmdbKey.trim() }.distinctUntilChanged(),
+                prefs.myList,
+                prefs.history,
+            ) { key, list, history -> Triple(key, list, history) }
+                .collectLatest { (key, list, history) -> loadPersonal(key, list, history) }
+        }
+
+        // Profilo bambini: conta il tempo a schermo acceso e blocca al limite.
+        viewModelScope.launch {
+            prefs.profile.collectLatest { p ->
+                _kidsLocked.value = false
+                if (!p.kids || p.dailyLimitMin <= 0) {
+                    _kidsRemaining.value = null
+                    return@collectLatest
+                }
+                while (true) {
+                    val remaining = p.dailyLimitMin * 60 - prefs.kidsUsedSeconds(p.id)
+                    _kidsRemaining.value = remaining.coerceAtLeast(0)
+                    if (remaining <= 0 && !_kidsLocked.value) {
+                        _kidsLocked.value = true
+                        enforceKidsLock()
+                    }
+                    delay(KIDS_TICK_S * 1000L)
+                    if (isInteractive() && !_kidsLocked.value) prefs.addKidsUsage(p.id, KIDS_TICK_S)
+                }
+            }
+        }
+
+        // Dirette TV: guida scaricata al massimo ogni 12 ore.
+        viewModelScope.launch {
+            combine(prefs.settings.map { it.liveTv }.distinctUntilChanged(), epgTick) { on, _ -> on }
+                .collectLatest { on ->
+                    if (!on) {
+                        _liveGuide.value = emptyList()
+                        return@collectLatest
+                    }
+                    while (true) {
+                        try {
+                            _liveGuide.value = epg.load()
+                            _epgStatus.value = "Guida aggiornata"
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            if (_liveGuide.value.isEmpty()) {
+                                _liveGuide.value = TvChannels.all.map { ChannelGuide(it, emptyList()) }
+                            }
+                            _epgStatus.value = "Guida non disponibile — " + describe(e)
+                        }
+                        delay(EPG_REFRESH_MS)
+                    }
+                }
+        }
+
+        // Musica: playlist del profilo Deezer.
+        viewModelScope.launch {
+            prefs.settings.map { it.deezerUserId.trim() }.distinctUntilChanged().collectLatest { id ->
+                if (id.isBlank()) {
+                    _playlists.value = emptyList()
+                    _musicStatus.value = ""
+                    return@collectLatest
+                }
+                try {
+                    val list = DeezerClient.playlists(id)
+                    _playlists.value = list
+                    _musicStatus.value = if (list.isEmpty()) "Nessuna playlist pubblica" else "${list.size} playlist"
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _musicStatus.value = "Deezer non raggiungibile — " + describe(e)
+                }
+            }
+        }
+
+        if (prefs.settings.value.autoUpdate) checkUpdate(manual = false)
+
         // Salvaschermo: parte dopo N minuti senza tocchi né tasti, solo sulla Home.
         viewModelScope.launch {
             combine(
@@ -258,8 +435,16 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         _notificationAccess.value =
             NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
         _deviceOwner.value = Kiosk.isOwner(ctx)
+        _adminActive.value = ctx.getSystemService(DevicePolicyManager::class.java)
+            ?.isAdminActive(Kiosk.admin(ctx)) == true
+        _statsPermission.value = StatsRepository.hasPermission(ctx)
         if (lastCatalog > 0 && SystemClock.elapsedRealtime() - lastCatalog > CATALOG_TTL_MS) {
             catalogTick.value = catalogTick.value + 1
+        }
+        if (prefs.settings.value.autoUpdate && lastUpdateCheck > 0 &&
+            SystemClock.elapsedRealtime() - lastUpdateCheck > CATALOG_TTL_MS
+        ) {
+            checkUpdate(manual = false)
         }
     }
 
@@ -442,6 +627,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openDetail(title: TmdbTitle, app: AppEntry?) {
         _detail.value = DetailState(title, listOfNotNull(app), resolving = true)
+        prefs.addHistory(title)
         val key = prefs.settings.value.tmdbKey.trim()
         viewModelScope.launch {
             val names = if (key.isBlank()) emptyList() else safe { TmdbClient(key).watchProviders(title.type, title.id) }
@@ -477,6 +663,446 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun watchTrailer(title: TmdbTitle) {
         searchYouTube("${title.title} ${title.year} trailer ita".trim())
     }
+
+    // ---- Profili e bambini ----
+
+    fun switchProfile(id: String) {
+        prefs.setProfile(id)
+        if (!prefs.favoritesInitialized) {
+            val byPkg = _apps.value.associateBy { it.packageName }
+            prefs.setFavorites(DEFAULT_FAVORITES.mapNotNull { byPkg[it]?.key })
+        }
+        _screensaver.value = false
+        goHome()
+    }
+
+    fun saveProfile(profile: Profile) = prefs.saveProfile(profile)
+
+    fun deleteProfile(id: String) = prefs.deleteProfile(id)
+
+    fun grantKidsExtra(minutes: Int) {
+        val p = prefs.profile.value
+        prefs.grantKidsExtra(p.id, minutes)
+        _kidsLocked.value = false
+        _kidsRemaining.value = (p.dailyLimitMin * 60 - prefs.kidsUsedSeconds(p.id)).coerceAtLeast(0)
+    }
+
+    private fun isInteractive(): Boolean =
+        ctx.getSystemService(PowerManager::class.java)?.isInteractive ?: true
+
+    /** Tempo finito: pausa, poi Salotto torna davanti (proprietario del dispositivo o root). */
+    private fun enforceKidsLock() {
+        SleepTimer.pauseEverything(ctx)
+        val intent = Intent(ctx, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        runCatching { ctx.startActivity(intent) }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!foreground.value) {
+                runCatching {
+                    Runtime.getRuntime()
+                        .exec(arrayOf("su", "-c", "am start -n ${ctx.packageName}/${MainActivity::class.java.name}"))
+                        .waitFor()
+                }
+            }
+        }
+    }
+
+    // ---- La mia lista, nuovi episodi, consigli ----
+
+    fun isInMyList(title: TmdbTitle): Boolean = prefs.isInMyList(title)
+
+    /** Restituisce true se il titolo è stato aggiunto. */
+    fun toggleMyList(title: TmdbTitle): Boolean {
+        val added = prefs.toggleMyList(title)
+        toast(if (added) "Aggiunto a La mia lista" else "Rimosso da La mia lista")
+        return added
+    }
+
+    private suspend fun loadPersonal(key: String, list: List<TmdbTitle>, history: List<TmdbTitle>) {
+        if (key.isBlank()) {
+            _newEpisodes.value = emptyList()
+            _recommendations.value = emptyList()
+            return
+        }
+        val client = TmdbClient(key)
+        val today = LocalDate.now()
+
+        val episodes = coroutineScope {
+            list.filter { it.type == "tv" }.take(15).map { series ->
+                async {
+                    try {
+                        client.lastEpisode(series)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+            }.awaitAll()
+        }.filterNotNull().filter { ep ->
+            val date = runCatching { LocalDate.parse(ep.airDate) }.getOrNull()
+            date != null && !date.isAfter(today) && !date.isBefore(today.minusDays(14))
+        }.sortedByDescending { it.airDate }
+        _newEpisodes.value = episodes
+
+        val inList = list.map { it.key }.toSet()
+        val seeds = (list.take(2) + history.take(3)).distinctBy { it.key }.take(3)
+        _recommendations.value = coroutineScope {
+            seeds.map { seed ->
+                async {
+                    val recs = safe { client.recommendations(seed) }
+                        .filter { it.posterUrl != null && it.key !in inList }
+                        .take(15)
+                    seed to recs
+                }
+            }.awaitAll()
+        }.filter { it.second.isNotEmpty() }
+    }
+
+    // ---- Dirette TV ----
+
+    fun openLive(channel: TvChannel) {
+        start(Intent(Intent.ACTION_VIEW, Uri.parse(channel.liveUrl)))
+    }
+
+    fun reloadEpg() {
+        viewModelScope.launch {
+            try {
+                _liveGuide.value = epg.load(force = true)
+                _epgStatus.value = "Guida aggiornata"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _epgStatus.value = "Guida non disponibile — " + describe(e)
+            }
+        }
+    }
+
+    // ---- Musica e casse ----
+
+    fun playPlaylist(playlist: Playlist, speaker: HaEntity?) {
+        if (speaker == null) {
+            start(Intent(Intent.ACTION_VIEW, Uri.parse(playlist.webUrl)))
+            return
+        }
+        val s = prefs.settings.value
+        if (!s.haConfigured) return
+        viewModelScope.launch {
+            val client = HaClient(s.haUrl, s.haToken)
+            val viaMass = try {
+                client.callService(
+                    "music_assistant",
+                    "play_media",
+                    JSONObject()
+                        .put("entity_id", speaker.id)
+                        .put("media_id", playlist.massUri)
+                        .put("media_type", "playlist"),
+                )
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
+            if (!viaMass) {
+                try {
+                    client.callService(
+                        "media_player",
+                        "play_media",
+                        JSONObject()
+                            .put("entity_id", speaker.id)
+                            .put("media_content_id", playlist.webUrl)
+                            .put("media_content_type", "playlist"),
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    toast("Non riesco ad avviare la playlist su ${speaker.name}")
+                    return@launch
+                }
+            }
+            toast("«${playlist.title}» su ${speaker.name}")
+            delay(1500)
+            refreshHa(client)
+        }
+    }
+
+    fun setSpeakerVolume(speaker: HaEntity, volume: Float) {
+        val s = prefs.settings.value
+        if (!s.haConfigured) return
+        _haAll.value = _haAll.value.map { if (it.id == speaker.id) it.copy(volume = volume) else it }
+        viewModelScope.launch {
+            runCatching {
+                HaClient(s.haUrl, s.haToken).callService(
+                    "media_player",
+                    "volume_set",
+                    JSONObject().put("entity_id", speaker.id).put("volume_level", volume.toDouble()),
+                )
+            }
+        }
+    }
+
+    fun toggleSpeaker(id: String) {
+        prefs.updateSettings { s ->
+            s.copy(musicSpeakers = if (id in s.musicSpeakers) s.musicSpeakers - id else s.musicSpeakers + id)
+        }
+    }
+
+    // ---- Ora in riproduzione e audio ----
+
+    fun mediaCommand(command: MediaCommand) {
+        val np = MediaListenerService.nowPlaying.value
+        val controls = np?.let { MediaListenerService.active[it.packageName] }?.transportControls
+        if (controls != null) {
+            runCatching {
+                when (command) {
+                    MediaCommand.PlayPause -> if (np?.playing == true) controls.pause() else controls.play()
+                    MediaCommand.Next -> controls.skipToNext()
+                    MediaCommand.Previous -> controls.skipToPrevious()
+                }
+            }
+            return
+        }
+        val code = when (command) {
+            MediaCommand.PlayPause -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+            MediaCommand.Next -> KeyEvent.KEYCODE_MEDIA_NEXT
+            MediaCommand.Previous -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
+        }
+        audio()?.let {
+            it.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
+            it.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
+        }
+    }
+
+    fun openNowPlayingApp() {
+        MediaListenerService.nowPlaying.value?.let { np ->
+            val item = store.items.value.firstOrNull { it.packageName == np.packageName && it.title == np.title }
+            if (item != null) resume(item) else launchPackage(np.packageName)
+        }
+    }
+
+    private fun audio(): AudioManager? = ctx.getSystemService(AudioManager::class.java)
+
+    fun volume(): Pair<Int, Int> {
+        val a = audio() ?: return 0 to 1
+        return a.getStreamVolume(AudioManager.STREAM_MUSIC) to a.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    }
+
+    fun setVolume(level: Int) {
+        runCatching { audio()?.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0) }
+    }
+
+    fun toggleMute() {
+        runCatching { audio()?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, 0) }
+    }
+
+    fun isMuted(): Boolean = audio()?.isStreamMute(AudioManager.STREAM_MUSIC) ?: false
+
+    /** Selettore dell'uscita audio di sistema (altoparlante, Bluetooth, cast). */
+    fun openOutputSwitcher() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            val shown = runCatching { MediaRouter2.getInstance(ctx).showSystemOutputSwitcher() }.getOrDefault(false)
+            if (shown) return
+        }
+        val pkg = MediaListenerService.nowPlaying.value?.packageName ?: ctx.packageName
+        val sent = runCatching {
+            ctx.sendBroadcast(
+                Intent("com.android.systemui.action.LAUNCH_MEDIA_OUTPUT_DIALOG")
+                    .setPackage("com.android.systemui")
+                    .putExtra("package_name", pkg)
+            )
+        }.isSuccess
+        if (!sent) start(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
+    }
+
+    fun openBluetoothSettings() = start(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
+
+    // ---- Timer di spegnimento ----
+
+    fun startSleepTimer(minutes: Int) {
+        SleepTimer.start(ctx, minutes)
+        toast("Spegnimento tra $minutes minuti")
+    }
+
+    fun cancelSleepTimer() {
+        SleepTimer.cancel(ctx)
+        toast("Timer annullato")
+    }
+
+    fun requestDeviceAdmin() {
+        start(
+            Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, Kiosk.admin(ctx))
+                .putExtra(
+                    DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                    "Serve a Salotto per spegnere lo schermo allo scadere del timer.",
+                )
+        )
+    }
+
+    // ---- Ricevitore Cast ----
+
+    fun openCastReceiver(): Boolean {
+        val apps = _apps.value
+        val match = apps.firstOrNull { it.packageName in CAST_PACKAGES }
+            ?: apps.firstOrNull { app ->
+                val label = app.label.lowercase()
+                CAST_KEYWORDS.any { it in label }
+            }
+        if (match != null) {
+            launch(match)
+            return true
+        }
+        return false
+    }
+
+    // ---- Aggiornamenti ----
+
+    fun checkUpdate(manual: Boolean) {
+        lastUpdateCheck = SystemClock.elapsedRealtime()
+        viewModelScope.launch {
+            if (manual) _updateStatus.value = "Controllo in corso…"
+            try {
+                val info = Updater.check(ctx)
+                _update.value = info
+                _updateStatus.value = if (info == null) {
+                    "Salotto è aggiornato (build ${Updater.currentBuild(ctx)})"
+                } else {
+                    "Disponibile la build ${info.build}"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (manual) _updateStatus.value = "Controllo non riuscito — " + describe(e)
+            }
+        }
+    }
+
+    fun installUpdate() {
+        val info = _update.value ?: return
+        viewModelScope.launch {
+            _updateStatus.value = "Scarico la build ${info.build}…"
+            try {
+                _updateStatus.value = Updater.install(ctx, info)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _updateStatus.value = "Aggiornamento non riuscito — " + describe(e)
+            }
+        }
+    }
+
+    // ---- Assistente ----
+
+    fun clearChat() {
+        _chat.value = emptyList()
+        _assistantTitles.value = emptyList()
+    }
+
+    fun ask(text: String) {
+        val question = text.trim()
+        val key = prefs.settings.value.anthropicKey.trim()
+        if (question.isEmpty()) return
+        if (key.isEmpty()) {
+            _chat.value = _chat.value + ChatMessage(false, "Per usarmi inserisci una chiave API di Anthropic nelle impostazioni.")
+            return
+        }
+        _chat.value = _chat.value + ChatMessage(true, question)
+        _assistantBusy.value = true
+        viewModelScope.launch {
+            try {
+                val reply = AssistantClient(key).ask(assistantContext(), _chat.value)
+                _chat.value = _chat.value + ChatMessage(false, reply.text.ifBlank { "Fatto." })
+                reply.actions.forEach { runHaAction(it) }
+                reply.openPackage?.let { pkg -> if (_apps.value.any { it.packageName == pkg }) launchPackage(pkg) }
+                _assistantTitles.value = resolveTitles(reply.titles)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: AssistantException) {
+                val msg = if (e.code == 401) "La chiave API non è valida." else "Errore dell'assistente: ${e.message}"
+                _chat.value = _chat.value + ChatMessage(false, msg)
+            } catch (e: Exception) {
+                _chat.value = _chat.value + ChatMessage(false, "Non riesco a raggiungere l'assistente — " + describe(e))
+            } finally {
+                _assistantBusy.value = false
+            }
+        }
+    }
+
+    private fun assistantContext(): String = buildString {
+        val now = LocalDateTime.now()
+        appendLine("Contesto attuale:")
+        appendLine("- Data e ora: ${now.format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.ITALIAN))}")
+        _weather.value?.let { appendLine("- Meteo a ${it.city}: ${it.temperature}°, ${it.description}") }
+        appendLine("- Profilo: ${prefs.profile.value.name}" + if (prefs.profile.value.kids) " (bambini: solo contenuti adatti)" else "")
+        val streaming = _providerRows.value.map { it.app.label }
+        if (streaming.isNotEmpty()) appendLine("- Servizi di streaming installati: ${streaming.joinToString()}")
+        appendLine("- App installate (nome = pacchetto): " +
+            _apps.value.take(120).joinToString("; ") { "${it.label} = ${it.packageName}" })
+        val list = prefs.myList.value.take(15)
+        if (list.isNotEmpty()) appendLine("- La mia lista: " + list.joinToString { "${it.title} (${it.year})" })
+        val recent = store.items.value.take(8)
+        if (recent.isNotEmpty()) appendLine("- Visti di recente: " + recent.joinToString { it.title })
+        MediaListenerService.nowPlaying.value?.let { appendLine("- In riproduzione: ${it.title} (${it.packageName})") }
+        val home = haTiles.value + speakers.value
+        if (home.isNotEmpty()) {
+            appendLine("- Entità di casa controllabili: " +
+                home.distinctBy { it.id }.joinToString("; ") { "${it.name} = ${it.id} (${it.stateLabel})" })
+        }
+    }
+
+    private suspend fun runHaAction(action: HaAction) {
+        val s = prefs.settings.value
+        if (!s.haConfigured) return
+        if (_haAll.value.none { it.id == action.entityId }) return
+        val domain = action.entityId.substringBefore('.')
+        val service = action.service.takeIf { it in setOf("turn_on", "turn_off", "toggle") } ?: "toggle"
+        val client = HaClient(s.haUrl, s.haToken)
+        try {
+            client.callService(domain, service, JSONObject().put("entity_id", action.entityId))
+            refreshHa(client)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            toast("Home Assistant: comando non riuscito")
+        }
+    }
+
+    private suspend fun resolveTitles(hints: List<TitleHint>): List<TmdbTitle> {
+        val key = prefs.settings.value.tmdbKey.trim()
+        if (key.isEmpty() || hints.isEmpty()) return emptyList()
+        val client = TmdbClient(key)
+        return coroutineScope {
+            hints.take(8).map { hint ->
+                async {
+                    val results = safe { client.search(hint.title) }
+                    results.firstOrNull { (hint.type == null || it.type == hint.type) && (hint.year.isBlank() || it.year == hint.year) }
+                        ?: results.firstOrNull { hint.type == null || it.type == hint.type }
+                }
+            }.awaitAll()
+        }.filterNotNull().filter { it.posterUrl != null }.distinctBy { it.key }
+    }
+
+    // ---- Statistiche ----
+
+    fun loadStats() {
+        val allowed = StatsRepository.hasPermission(ctx)
+        _statsPermission.value = allowed
+        if (!allowed) return
+        val extra = (
+            _providerRows.value.map { it.app.packageName } +
+                favorites.value.map { it.packageName } +
+                store.items.value.map { it.packageName } +
+                DEFAULT_FAVORITES
+            ).toSet()
+        viewModelScope.launch {
+            _stats.value = runCatching { StatsRepository.week(ctx, extra) }.getOrNull()
+        }
+    }
+
+    fun openUsageAccess() = start(Intent(AndroidSettings.ACTION_USAGE_ACCESS_SETTINGS))
+
+    fun appByPackage(pkg: String): AppEntry? = _apps.value.firstOrNull { it.packageName == pkg }
 
     // ---- Avvio app e contenuti ----
 
@@ -624,6 +1250,19 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         const val CATALOG_TTL_MS = 6L * 60 * 60 * 1000
         const val HA_POLL_MS = 15_000L
         const val WEATHER_TTL_MS = 30L * 60 * 1000
+        const val KIDS_TICK_S = 30
+        const val EPG_REFRESH_MS = 60L * 60 * 1000
+
+        /** Ricevitori Cast/AirPlay/Miracast più diffusi. */
+        val CAST_PACKAGES = setOf(
+            "com.ionitech.airscreen",
+            "com.waxrain.airplaydmr",
+            "com.waxrain.airplaydmr_free",
+            "com.hpplay.happyplay.aw",
+            "com.xindawn",
+            "com.toxic.apps.chrome",
+        )
+        val CAST_KEYWORDS = listOf("airscreen", "miracast", "cast receiver", "ricevitore", "wi-fi display", "airplay", "airpin")
 
         val DEFAULT_FAVORITES = listOf(
             "com.google.android.youtube",

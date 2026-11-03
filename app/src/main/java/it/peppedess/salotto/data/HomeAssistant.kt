@@ -15,6 +15,9 @@ data class HaEntity(
     val id: String,
     val name: String,
     val state: String,
+    val volume: Float? = null,
+    val mediaTitle: String? = null,
+    val mediaArtist: String? = null,
 ) {
     val domain: String get() = id.substringBefore('.')
 
@@ -41,7 +44,9 @@ data class HaEntity(
                 else -> state
             }
             domain == "media_player" -> when (state) {
-                "playing" -> "In riproduzione"
+                "playing" -> mediaTitle?.takeIf { it.isNotBlank() }
+                    ?.let { t -> listOfNotNull(t, mediaArtist?.takeIf { it.isNotBlank() }).joinToString(" · ") }
+                    ?: "In riproduzione"
                 "paused" -> "In pausa"
                 "off" -> "Spento"
                 "idle", "standby" -> "In attesa"
@@ -86,14 +91,27 @@ class HaClient(baseUrl: String, private val token: String) {
             if (id.substringBefore('.') !in HaEntity.SUPPORTED_DOMAINS) return@mapNotNull null
             val attrs = o.optJSONObject("attributes")
             val name = attrs?.optString("friendly_name").orEmpty().ifBlank { id.substringAfter('.') }
-            HaEntity(id = id, name = name, state = o.optString("state"))
+            HaEntity(
+                id = id,
+                name = name,
+                state = o.optString("state"),
+                volume = attrs?.takeIf { it.has("volume_level") && !it.isNull("volume_level") }
+                    ?.optDouble("volume_level")?.toFloat(),
+                mediaTitle = attrs?.takeIf { it.has("media_title") && !it.isNull("media_title") }
+                    ?.optString("media_title"),
+                mediaArtist = attrs?.takeIf { it.has("media_artist") && !it.isNull("media_artist") }
+                    ?.optString("media_artist"),
+            )
         }.sortedWith(compareBy({ it.domain }, { it.name.lowercase() }))
     }
 
-    suspend fun call(entity: HaEntity) = withContext(Dispatchers.IO) {
+    suspend fun call(entity: HaEntity) {
         val (domain, service) = entity.service
-        val body = JSONObject().put("entity_id", entity.id).toString()
-            .toRequestBody("application/json".toMediaType())
+        callService(domain, service, JSONObject().put("entity_id", entity.id))
+    }
+
+    suspend fun callService(domain: String, service: String, data: JSONObject) = withContext(Dispatchers.IO) {
+        val body = data.toString().toRequestBody("application/json".toMediaType())
         execute(request("api/services/$domain/$service").post(body).build())
         Unit
     }

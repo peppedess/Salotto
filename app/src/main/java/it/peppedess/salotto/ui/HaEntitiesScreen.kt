@@ -60,7 +60,7 @@ private val DOMAIN_LABELS = linkedMapOf(
 
 /** Scelta delle entità di Home Assistant da mostrare nella riga "Casa". */
 @Composable
-fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit) {
+fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit, speakersMode: Boolean = false) {
     BackHandler(onBack = onClose)
     val all by vm.haAll.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -69,9 +69,10 @@ fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit) {
 
     LaunchedEffect(Unit) { vm.refreshHomeAssistant() }
 
-    val selected = settings.haEntities
-    val visible = all.filter { filter == null || it.domain == filter }
-    val domains = DOMAIN_LABELS.keys.filter { d -> all.any { it.domain == d } }
+    val selected = if (speakersMode) settings.musicSpeakers else settings.haEntities
+    val pool = if (speakersMode) all.filter { it.domain == "media_player" } else all
+    val visible = pool.filter { filter == null || it.domain == filter }
+    val domains = if (speakersMode) emptyList() else DOMAIN_LABELS.keys.filter { d -> all.any { it.domain == d } }
 
     Column(
         Modifier
@@ -89,7 +90,7 @@ fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit) {
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Riga \"Casa\"",
+                    if (speakersMode) "Casse per la musica" else "Riga \"Casa\"",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -107,7 +108,7 @@ fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit) {
             contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = 8.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (all.isEmpty()) {
+            if (pool.isEmpty()) {
                 item(key = "empty") {
                     Text(
                         text = status.ifBlank { "Caricamento delle entità…" },
@@ -116,7 +117,7 @@ fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit) {
                         modifier = Modifier.padding(vertical = 12.dp),
                     )
                 }
-            } else {
+            } else if (domains.isNotEmpty()) {
                 item(key = "filters") {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -134,7 +135,7 @@ fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit) {
             items(visible, key = { it.id }) { entity ->
                 val checked = entity.id in selected
                 TvCard(
-                    onClick = { vm.toggleHaEntity(entity.id) },
+                    onClick = { if (speakersMode) vm.toggleSpeaker(entity.id) else vm.toggleHaEntity(entity.id) },
                     modifier = Modifier.fillMaxWidth().height(60.dp),
                     shape = RoundedCornerShape(16.dp),
                     focusScale = 1.01f,

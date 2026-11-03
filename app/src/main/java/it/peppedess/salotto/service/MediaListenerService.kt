@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.net.HttpURLConnection
 import java.net.URL
@@ -76,6 +77,7 @@ class MediaListenerService : NotificationListenerService() {
 
                     override fun onSessionDestroyed() {
                         active.remove(controller.packageName, controller)
+                        if (nowPlaying.value?.packageName == controller.packageName) nowPlaying.value = null
                         ContinueStore.get(this@MediaListenerService).markStopped(controller.packageName)
                     }
                 }
@@ -92,6 +94,11 @@ class MediaListenerService : NotificationListenerService() {
         }
         registered.clear()
         active.clear()
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        nowPlaying.value = null
     }
 
     private fun snapshot(controller: MediaController) {
@@ -120,6 +127,20 @@ class MediaListenerService : NotificationListenerService() {
             position += (elapsed * state.playbackSpeed).toLong()
         }
         if (duration > 0) position = position.coerceAtMost(duration)
+
+        // Barra "Ora in riproduzione": vince la sessione che sta suonando.
+        val current = nowPlaying.value
+        if (playing || current == null || current.packageName == controller.packageName) {
+            nowPlaying.value = NowPlaying(
+                packageName = controller.packageName,
+                title = title,
+                subtitle = subtitle,
+                art = art,
+                playing = playing,
+                positionMs = position,
+                durationMs = duration,
+            )
+        }
 
         val store = ContinueStore.get(this)
         store.upsert(
@@ -164,5 +185,18 @@ class MediaListenerService : NotificationListenerService() {
     companion object {
         /** Controller delle sessioni ancora vive, per riprendere la riproduzione. */
         val active = ConcurrentHashMap<String, MediaController>()
+
+        /** Contenuto in riproduzione (o appena messo in pausa) in qualsiasi app. */
+        val nowPlaying = MutableStateFlow<NowPlaying?>(null)
     }
 }
+
+data class NowPlaying(
+    val packageName: String,
+    val title: String,
+    val subtitle: String,
+    val art: Bitmap?,
+    val playing: Boolean,
+    val positionMs: Long,
+    val durationMs: Long,
+)

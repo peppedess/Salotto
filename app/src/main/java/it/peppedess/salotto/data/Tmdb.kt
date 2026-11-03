@@ -19,6 +19,40 @@ data class TmdbTitle(
 ) {
     val key: String get() = type + id
     val kindLabel: String get() = if (type == "tv") "Serie TV" else "Film"
+
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("type", type)
+        .put("title", title)
+        .put("overview", overview)
+        .put("poster", posterUrl ?: "")
+        .put("backdrop", backdropUrl ?: "")
+        .put("year", year)
+        .put("rating", rating)
+
+    companion object {
+        fun fromJson(o: JSONObject) = TmdbTitle(
+            id = o.optInt("id"),
+            type = o.optString("type", "movie"),
+            title = o.optString("title"),
+            overview = o.optString("overview"),
+            posterUrl = o.optString("poster").ifEmpty { null },
+            backdropUrl = o.optString("backdrop").ifEmpty { null },
+            year = o.optString("year"),
+            rating = o.optDouble("rating", 0.0),
+        )
+    }
+}
+
+/** Ultimo (o prossimo) episodio di una serie. */
+data class EpisodeInfo(
+    val series: TmdbTitle,
+    val season: Int,
+    val episode: Int,
+    val name: String,
+    val airDate: String,
+) {
+    val code: String get() = "S${season}E$episode"
 }
 
 data class TmdbProvider(val id: Int, val name: String, val priority: Int)
@@ -64,6 +98,23 @@ class TmdbClient(credential: String) {
             }
         }
         return out.distinctBy { it.id }.sortedBy { it.priority }
+    }
+
+    suspend fun recommendations(title: TmdbTitle): List<TmdbTitle> =
+        parseList(get("/${title.type}/${title.id}/recommendations"), title.type)
+
+    /** Ultimo episodio uscito di una serie, se c'è. */
+    suspend fun lastEpisode(series: TmdbTitle): EpisodeInfo? {
+        val o = get("/tv/${series.id}").optJSONObject("last_episode_to_air") ?: return null
+        val date = str(o, "air_date")
+        if (date.isBlank()) return null
+        return EpisodeInfo(
+            series = series,
+            season = o.optInt("season_number"),
+            episode = o.optInt("episode_number"),
+            name = str(o, "name"),
+            airDate = date,
+        )
     }
 
     /** Nomi dei servizi su cui il titolo è disponibile in Italia. */

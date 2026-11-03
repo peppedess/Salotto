@@ -54,6 +54,20 @@ import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.Refresh
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.LiveTv
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.Speaker
+import androidx.compose.material.icons.rounded.SystemUpdate
 import it.peppedess.salotto.ui.components.PinDialog
 import it.peppedess.salotto.ui.components.TextInputDialog
 import it.peppedess.salotto.ui.components.TvCard
@@ -61,7 +75,14 @@ import it.peppedess.salotto.ui.components.TvIconButton
 import it.peppedess.salotto.ui.theme.Bg
 
 @Composable
-fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit, onHaEntities: () -> Unit) {
+fun SettingsScreen(
+    vm: HomeViewModel,
+    onClose: () -> Unit,
+    onHaEntities: () -> Unit,
+    onSpeakers: () -> Unit,
+    onProfiles: () -> Unit,
+    onStats: () -> Unit,
+) {
     BackHandler(onBack = onClose)
     val context = LocalContext.current
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -75,6 +96,16 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit, onHaEntities: () -> U
     var haTokenDialog by remember { mutableStateOf(false) }
     val haStatus by vm.haStatus.collectAsStateWithLifecycle()
     val weather by vm.weather.collectAsStateWithLifecycle()
+    val musicStatus by vm.musicStatus.collectAsStateWithLifecycle()
+    val epgStatus by vm.epgStatus.collectAsStateWithLifecycle()
+    val adminActive by vm.adminActive.collectAsStateWithLifecycle()
+    val statsAllowed by vm.statsPermission.collectAsStateWithLifecycle()
+    val update by vm.update.collectAsStateWithLifecycle()
+    val updateStatus by vm.updateStatus.collectAsStateWithLifecycle()
+    val profiles by vm.profiles.collectAsStateWithLifecycle()
+    var deezerDialog by remember { mutableStateOf(false) }
+    var anthropicDialog by remember { mutableStateOf(false) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val catalogStatus by vm.catalogStatus.collectAsStateWithLifecycle()
 
     val version = remember {
@@ -281,6 +312,134 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit, onHaEntities: () -> U
                 }
             }
 
+            item { SectionTitle("Profili") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Group,
+                    title = "Profili e modalità bambini",
+                    subtitle = "${profiles.size} profili · preferite, lista e regole separate",
+                    onClick = onProfiles,
+                )
+            }
+
+            item { SectionTitle("Musica") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.LibraryMusic,
+                    title = "Profilo Deezer",
+                    subtitle = if (settings.deezerUserId.isBlank()) {
+                        "Inserisci il tuo ID utente per vedere le playlist"
+                    } else {
+                        "ID ${settings.deezerUserId}" + if (musicStatus.isNotBlank()) " · $musicStatus" else ""
+                    },
+                    onClick = { deezerDialog = true },
+                )
+            }
+            if (settings.haConfigured) {
+                item {
+                    SettingRow(
+                        icon = Icons.Rounded.Speaker,
+                        title = "Casse per la musica",
+                        subtitle = if (settings.musicSpeakers.isEmpty()) {
+                            "Scegli i lettori di Home Assistant (Sonos, Music Assistant…)"
+                        } else {
+                            "${settings.musicSpeakers.size} casse"
+                        },
+                        onClick = onSpeakers,
+                    )
+                }
+            }
+
+            item { SectionTitle("TV e film") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.LiveTv,
+                    title = "Dirette TV",
+                    subtitle = if (settings.liveTv) epgStatus.ifBlank { "Riga \"In onda ora\" attiva" } else "Disattivata",
+                    checked = settings.liveTv,
+                    onClick = { vm.updateSettings { s -> s.copy(liveTv = !s.liveTv) } },
+                )
+            }
+            if (settings.liveTv) {
+                item {
+                    SettingRow(
+                        icon = Icons.Rounded.Refresh,
+                        title = "Aggiorna la guida TV",
+                        subtitle = "Scarica di nuovo il palinsesto",
+                        onClick = {
+                            vm.reloadEpg()
+                            message = "Aggiorno la guida TV…"
+                        },
+                    )
+                }
+            }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.NotificationsActive,
+                    title = "Avvisi dei nuovi episodi",
+                    subtitle = "Per le serie in La mia lista (serve la chiave TMDB)",
+                    checked = settings.episodeAlerts,
+                    onClick = {
+                        val enable = !settings.episodeAlerts
+                        vm.updateSettings { s -> s.copy(episodeAlerts = enable) }
+                        if (enable && Build.VERSION.SDK_INT >= 33) {
+                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    },
+                )
+            }
+
+            item { SectionTitle("Assistente") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.AutoAwesome,
+                    title = "Chiave API di Anthropic",
+                    subtitle = if (settings.anthropicKey.isBlank()) {
+                        "Serve per l'assistente: la crei su console.anthropic.com"
+                    } else {
+                        "Impostata · modello ${it.peppedess.salotto.data.AssistantClient.MODEL}"
+                    },
+                    onClick = { anthropicDialog = true },
+                )
+            }
+
+            item { SectionTitle("Timer e statistiche") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Bedtime,
+                    title = "Spegnimento dello schermo",
+                    subtitle = if (adminActive) "Attivo: il timer spegne lo schermo" else "Tocca per permettere al timer di spegnere lo schermo",
+                    onClick = { if (!adminActive) vm.requestDeviceAdmin() },
+                )
+            }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.BarChart,
+                    title = "Statistiche di visione",
+                    subtitle = if (statsAllowed) "Ore passate nelle app negli ultimi 7 giorni" else "Serve l'accesso ai dati di utilizzo",
+                    onClick = { if (statsAllowed) onStats() else vm.openUsageAccess() },
+                )
+            }
+
+            item { SectionTitle("Aggiornamenti") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.SystemUpdate,
+                    title = "Controlla automaticamente",
+                    subtitle = "Cerca nuove build su GitHub e avvisa",
+                    checked = settings.autoUpdate,
+                    onClick = { vm.updateSettings { s -> s.copy(autoUpdate = !s.autoUpdate) } },
+                )
+            }
+            item {
+                SettingRow(
+                    icon = if (update != null) Icons.Rounded.Download else Icons.Rounded.Refresh,
+                    title = if (update != null) "Installa la build ${update?.build}" else "Controlla adesso",
+                    subtitle = updateStatus.ifBlank { "Build attuale ${it.peppedess.salotto.data.Updater.currentBuild(context)}" },
+                    onClick = { if (update != null) vm.installUpdate() else vm.checkUpdate(manual = true) },
+                )
+            }
+
             item { SectionTitle("Kiosk") }
             item {
                 SettingRow(
@@ -397,6 +556,34 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit, onHaEntities: () -> U
                 message = if (token.isBlank()) "Token rimosso." else "Token salvato."
             },
             onDismiss = { haTokenDialog = false },
+        )
+    }
+
+    if (deezerDialog) {
+        TextInputDialog(
+            title = "Profilo Deezer",
+            label = "ID utente",
+            initial = settings.deezerUserId,
+            help = "Deezer → Profilo → Condividi: è il numero alla fine del link. Le playlist devono essere pubbliche.",
+            onConfirm = { id ->
+                vm.updateSettings { s -> s.copy(deezerUserId = id.filter { c -> c.isDigit() }) }
+                deezerDialog = false
+            },
+            onDismiss = { deezerDialog = false },
+        )
+    }
+
+    if (anthropicDialog) {
+        TextInputDialog(
+            title = "Chiave API di Anthropic",
+            label = "Chiave (sk-ant-…)",
+            initial = settings.anthropicKey,
+            help = "Le domande all'assistente usano questa chiave e il suo credito.",
+            onConfirm = { key ->
+                vm.updateSettings { s -> s.copy(anthropicKey = key) }
+                anthropicDialog = false
+            },
+            onDismiss = { anthropicDialog = false },
         )
     }
 
