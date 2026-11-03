@@ -1,6 +1,7 @@
 package it.peppedess.salotto.data
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherActivityInfo
 import android.content.pm.LauncherApps
 import android.graphics.Bitmap
@@ -24,6 +25,8 @@ data class AppEntry(
     val icon: ImageBitmap,
     val banner: ImageBitmap?,
     val color: Color,
+    /** Video, streaming, giochi o app per TV. */
+    val entertainment: Boolean = false,
 )
 
 class AppRepository(private val context: Context) {
@@ -49,14 +52,28 @@ class AppRepository(private val context: Context) {
             ?: palette.dominantSwatch?.rgb
             ?: 0xFF33415C.toInt()
         val tone = ColorUtils.blendARGB(raw, android.graphics.Color.BLACK, 0.35f)
+        val label = info.label.toString()
         return AppEntry(
             key = info.componentName.flattenToString(),
             packageName = info.applicationInfo.packageName,
-            label = info.label.toString(),
+            label = label,
             icon = icon.asImageBitmap(),
             banner = banner?.asImageBitmap(),
             color = Color(tone),
+            entertainment = isEntertainment(info.applicationInfo, label),
         )
+    }
+
+    private fun isEntertainment(ai: ApplicationInfo, label: String): Boolean {
+        val pkg = ai.packageName
+        if (EXCLUDED.any { pkg.startsWith(it) }) return false
+        if (ai.category == ApplicationInfo.CATEGORY_VIDEO || ai.category == ApplicationInfo.CATEGORY_GAME) return true
+        @Suppress("DEPRECATION")
+        if (ai.flags and ApplicationInfo.FLAG_IS_GAME != 0) return true
+        if (KNOWN.any { pkg.startsWith(it) }) return true
+        if (pm.getLeanbackLaunchIntentForPackage(pkg) != null) return true
+        val words = label.lowercase(Locale.ITALIAN).split(' ', '-', '+', '.', ':')
+        return words.any { it in KEYWORDS }
     }
 
     private fun loadBanner(info: LauncherActivityInfo): Bitmap? {
@@ -77,6 +94,23 @@ class AppRepository(private val context: Context) {
     }
 
     private companion object {
+        /** Servizi di streaming, TV e lettori video più diffusi in Italia. */
+        val KNOWN = listOf(
+            "com.netflix", "com.amazon.avod", "com.disney", "it.rainet", "it.rai.", "it.mediaset",
+            "com.dazn", "it.sky", "com.nowtv", "com.cbs.", "com.paramount", "com.apple.atve",
+            "com.crunchyroll", "tv.twitch", "com.google.android.youtube", "com.google.android.apps.youtube.kids",
+            "com.google.android.videos", "com.plexapp", "org.xbmc.kodi", "org.videolan.vlc", "com.mxtech",
+            "com.stremio", "it.telecomitalia", "it.timvision", "com.discovery", "it.dplay", "tv.pluto",
+            "tv.rakuten", "it.chili", "com.mubi", "it.la7", "com.wbd", "com.hbo", "com.zattoo",
+            "com.samsung.android.tvplus", "com.infuse", "com.jellyfin", "org.jellyfin", "com.emby",
+            "com.ionitech.airscreen", "it.tv8", "com.sky.", "com.peacocktv",
+        )
+        /** App che non sono intrattenimento video anche se ne hanno l'aspetto. */
+        val EXCLUDED = listOf(
+            "com.google.android.apps.youtube.music", "com.google.android.apps.youtube.creator",
+            "com.spotify", "deezer.", "com.amazon.mp3", "com.android.vending",
+        )
+        val KEYWORDS = setOf("tv", "video", "film", "cinema", "movie", "movies", "stream", "streaming", "anime", "serie", "player", "giochi", "games")
         const val ICON_PX = 192
         const val BANNER_PX = 480f
     }

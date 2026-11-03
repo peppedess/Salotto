@@ -2,6 +2,13 @@ package it.peppedess.salotto.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.runtime.CompositionLocalProvider
+import it.peppedess.salotto.ui.components.LocalScreenScope
+import it.peppedess.salotto.ui.components.LocalSharedScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -52,7 +59,7 @@ import it.peppedess.salotto.ui.components.PinDialog
 import it.peppedess.salotto.ui.components.TvPill
 import it.peppedess.salotto.ui.theme.Bg
 
-enum class Screen { Home, Search, Settings, Detail, HaEntities, Speakers, Stats, Profiles }
+enum class Screen { Home, Search, Settings, Detail, HaEntities, Stats, Profiles }
 
 /** Azione che richiede il PIN prima di essere eseguita. */
 private sealed interface PinAction {
@@ -62,6 +69,7 @@ private sealed interface PinAction {
     data object KidsSwitch : PinAction
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun SalottoApp(vm: HomeViewModel) {
     var screen by rememberSaveable { mutableStateOf(Screen.Home) }
@@ -113,13 +121,22 @@ fun SalottoApp(vm: HomeViewModel) {
         guarded(PinAction.Settings, needsPin = settings.kiosk || profile.kids) { perform(PinAction.Settings) }
     }
 
-    if (!kidsLocked) AnimatedContent(
+    if (!kidsLocked) SharedTransitionLayout {
+      CompositionLocalProvider(LocalSharedScope provides this) {
+        AnimatedContent(
         targetState = screen,
         transitionSpec = {
-            (fadeIn(tween(260)) + scaleIn(tween(260), initialScale = 0.97f)) togetherWith fadeOut(tween(160))
+            val toDetail = targetState == Screen.Detail
+            val fromDetail = initialState == Screen.Detail
+            when {
+                toDetail -> (fadeIn(tween(320)) + slideInHorizontally(tween(380)) { it / 8 }) togetherWith fadeOut(tween(220))
+                fromDetail -> fadeIn(tween(280)) togetherWith (fadeOut(tween(220)) + slideOutHorizontally(tween(320)) { it / 8 })
+                else -> (fadeIn(tween(260)) + scaleIn(tween(260), initialScale = 0.97f)) togetherWith fadeOut(tween(160))
+            }
         },
         label = "screen",
     ) { target ->
+      CompositionLocalProvider(LocalScreenScope provides this) {
         when (target) {
             Screen.Home -> HomeScreen(
                 vm = vm,
@@ -129,8 +146,8 @@ fun SalottoApp(vm: HomeViewModel) {
                 },
                 onSettings = openSettings,
                 onAppMenu = { menuApp = it },
-                onOpenTitle = { title, app ->
-                    vm.openDetail(title, app)
+                onOpenTitle = { title, app, shareKey ->
+                    vm.openDetail(title, app, shareKey)
                     detailReturn = Screen.Home
                     screen = Screen.Detail
                 },
@@ -154,7 +171,6 @@ fun SalottoApp(vm: HomeViewModel) {
                 vm = vm,
                 onClose = { screen = Screen.Home },
                 onHaEntities = { screen = Screen.HaEntities },
-                onSpeakers = { screen = Screen.Speakers },
                 onProfiles = { screen = Screen.Profiles },
                 onStats = { screen = Screen.Stats },
             )
@@ -162,17 +178,12 @@ fun SalottoApp(vm: HomeViewModel) {
             Screen.Detail -> DetailScreen(
                 vm = vm,
                 onClose = { screen = detailReturn },
+                onOpenTitle = { title -> vm.openDetail(title, null) },
             )
 
             Screen.HaEntities -> HaEntitiesScreen(
                 vm = vm,
                 onClose = { screen = Screen.Settings },
-            )
-
-            Screen.Speakers -> HaEntitiesScreen(
-                vm = vm,
-                onClose = { screen = Screen.Settings },
-                speakersMode = true,
             )
 
             Screen.Stats -> StatsScreen(
@@ -185,6 +196,9 @@ fun SalottoApp(vm: HomeViewModel) {
                 onClose = { screen = Screen.Settings },
             )
         }
+      }
+    }
+      }
     }
 
     // Tempo finito per il profilo bambini.

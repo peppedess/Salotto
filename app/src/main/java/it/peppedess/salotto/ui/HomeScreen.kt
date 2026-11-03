@@ -95,12 +95,13 @@ import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import androidx.compose.ui.platform.LocalContext
 import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.ChannelGuide
 import it.peppedess.salotto.data.ContinueItem
 import it.peppedess.salotto.data.EpisodeInfo
 import it.peppedess.salotto.data.HaEntity
-import it.peppedess.salotto.data.Playlist
 import it.peppedess.salotto.data.Profile
 import it.peppedess.salotto.data.TmdbTitle
 import it.peppedess.salotto.data.Weather
@@ -149,6 +150,7 @@ private sealed interface HeroSlide {
 fun TmdbTitle.metaLine(): String = listOfNotNull(
     year.takeIf { it.isNotBlank() },
     kindLabel,
+    genres.take(2).joinToString(", ").takeIf { it.isNotBlank() },
     if (rating > 0) "★ " + String.format(Locale.ITALIAN, "%.1f", rating) else null,
 ).joinToString(" · ")
 
@@ -164,8 +166,6 @@ private data class HomeData(
     val episodes: List<EpisodeInfo>,
     val recommendations: List<Pair<TmdbTitle, List<TmdbTitle>>>,
     val live: List<ChannelGuide>,
-    val playlists: List<Playlist>,
-    val speakers: List<HaEntity>,
     val byPkg: Map<String, AppEntry>,
     val access: Boolean,
     val loading: Boolean,
@@ -180,12 +180,13 @@ fun HomeScreen(
     onSearch: (voice: Boolean) -> Unit,
     onSettings: () -> Unit,
     onAppMenu: (AppEntry) -> Unit,
-    onOpenTitle: (TmdbTitle, AppEntry?) -> Unit,
+    onOpenTitle: (TmdbTitle, AppEntry?, String?) -> Unit,
     onStats: () -> Unit,
     onProfiles: () -> Unit,
 ) {
     val profile by vm.profile.collectAsStateWithLifecycle()
     val apps by vm.apps.collectAsStateWithLifecycle()
+    val listed by vm.listedApps.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val media by vm.continueItems.collectAsStateWithLifecycle()
     val access by vm.notificationAccess.collectAsStateWithLifecycle()
@@ -200,8 +201,6 @@ fun HomeScreen(
     val episodes by vm.newEpisodes.collectAsStateWithLifecycle()
     val recommendations by vm.recommendations.collectAsStateWithLifecycle()
     val live by vm.liveGuide.collectAsStateWithLifecycle()
-    val playlists by vm.playlists.collectAsStateWithLifecycle()
-    val speakers by vm.speakers.collectAsStateWithLifecycle()
     val sleepEndsAt by vm.sleepEndsAt.collectAsStateWithLifecycle()
     val adminActive by vm.adminActive.collectAsStateWithLifecycle()
     val update by vm.update.collectAsStateWithLifecycle()
@@ -213,7 +212,6 @@ fun HomeScreen(
     var ambientArt by remember { mutableStateOf<Any?>(null) }
     var menuItem by remember { mutableStateOf<ContinueItem?>(null) }
     var channelMenu by remember { mutableStateOf<ChannelGuide?>(null) }
-    var playlistMenu by remember { mutableStateOf<Playlist?>(null) }
     var showAudio by remember { mutableStateOf(false) }
     var showSleep by remember { mutableStateOf(false) }
     var showCastHelp by remember { mutableStateOf(false) }
@@ -229,8 +227,22 @@ fun HomeScreen(
     val setAmbient: (Color) -> Unit = { ambientTarget = it }
     val setArt: (Any?) -> Unit = { if (it != null) ambientArt = it }
 
-    val data = HomeData(
-        apps = apps,
+    // Lo sfondo sfocato cambia solo quando ci si ferma su un elemento: niente sfarfallio scorrendo.
+    val context = LocalContext.current
+    var shownArt by remember { mutableStateOf<Any?>(null) }
+    LaunchedEffect(ambientArt) {
+        delay(260)
+        shownArt = ambientArt
+    }
+
+    val liveRows = if (settings.liveTv) live else emptyList()
+    val showTmdbHint = settings.tmdbKey.isBlank()
+    val data = remember(
+        listed, favorites, media, rows, trending, haTiles, myList, episodes,
+        recommendations, liveRows, byPkg, access, loading, showTmdbHint, update, sleepEndsAt,
+    ) {
+        HomeData(
+        apps = listed,
         favorites = favorites,
         media = media,
         rows = rows,
@@ -239,16 +251,15 @@ fun HomeScreen(
         myList = myList,
         episodes = episodes,
         recommendations = recommendations,
-        live = if (settings.liveTv) live else emptyList(),
-        playlists = playlists,
-        speakers = speakers,
+        live = liveRows,
         byPkg = byPkg,
         access = access,
         loading = loading,
-        showTmdbHint = settings.tmdbKey.isBlank(),
+        showTmdbHint = showTmdbHint,
         updateBuild = update?.build,
         sleepEndsAt = sleepEndsAt,
-    )
+        )
+    }
 
     Box(
         Modifier
@@ -256,16 +267,17 @@ fun HomeScreen(
             .background(Bg)
     ) {
         // Sfondo: immagine sfocata dell'elemento selezionato, più un alone di colore.
-        Crossfade(targetState = ambientArt, animationSpec = tween(900), label = "ambientArt") { art ->
+        Crossfade(targetState = shownArt, animationSpec = tween(900), label = "ambientArt") { art ->
             if (art != null) {
+                // Immagine piccola ingrandita: già morbida, così la sfocatura costa poco.
                 AsyncImage(
-                    model = art,
+                    model = ImageRequest.Builder(context).data(art).size(160, 90).build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
-                        .blur(48.dp)
-                        .graphicsLayer { alpha = if (Build.VERSION.SDK_INT >= 31) 0.38f else 0.14f },
+                        .blur(24.dp)
+                        .graphicsLayer { alpha = if (Build.VERSION.SDK_INT >= 31) 0.4f else 0.18f },
                 )
             }
         }
@@ -323,7 +335,6 @@ fun HomeScreen(
                             onTmdbHint = onSettings,
                             onOpenLive = { vm.openLive(it.channel) },
                             onChannelMenu = { channelMenu = it },
-                            onPlaylist = { playlistMenu = it },
                             onInstallUpdate = { vm.installUpdate() },
                             onSleep = { showSleep = true },
                             onAudio = { showAudio = true },
@@ -335,7 +346,7 @@ fun HomeScreen(
                             },
                         )
                     } else {
-                        AllApps(apps = apps, onAmbient = setAmbient, onLaunch = vm::launch, onAppMenu = onAppMenu)
+                        AllApps(apps = listed, onAmbient = setAmbient, onLaunch = vm::launch, onAppMenu = onAppMenu)
                     }
                 }
             }
@@ -375,19 +386,8 @@ fun HomeScreen(
             onDismiss = { channelMenu = null },
         )
     }
-    playlistMenu?.let { playlist ->
-        PlaylistDialog(
-            playlist = playlist,
-            speakers = speakers,
-            onPick = { speaker ->
-                vm.playPlaylist(playlist, speaker)
-                playlistMenu = null
-            },
-            onDismiss = { playlistMenu = null },
-        )
-    }
     if (showAudio) {
-        AudioDialog(vm = vm, speakers = speakers, onDismiss = { showAudio = false })
+        AudioDialog(vm = vm, onDismiss = { showAudio = false })
     }
     if (showSleep) {
         SleepDialog(
@@ -528,13 +528,12 @@ private fun ForYou(
     onResume: (ContinueItem) -> Unit,
     onAppMenu: (AppEntry) -> Unit,
     onMediaMenu: (ContinueItem) -> Unit,
-    onOpenTitle: (TmdbTitle, AppEntry?) -> Unit,
+    onOpenTitle: (TmdbTitle, AppEntry?, String?) -> Unit,
     onHaPress: (HaEntity) -> Unit,
     onEnableAccess: () -> Unit,
     onTmdbHint: () -> Unit,
     onOpenLive: (ChannelGuide) -> Unit,
     onChannelMenu: (ChannelGuide) -> Unit,
-    onPlaylist: (Playlist) -> Unit,
     onInstallUpdate: () -> Unit,
     onSleep: () -> Unit,
     onAudio: () -> Unit,
@@ -578,7 +577,7 @@ private fun ForYou(
                     onAction = { slide ->
                         when (slide) {
                             is HeroSlide.Media -> onResume(slide.item)
-                            is HeroSlide.Featured -> onOpenTitle(slide.title, slide.app)
+                            is HeroSlide.Featured -> onOpenTitle(slide.title, slide.app, null)
                             is HeroSlide.App -> onLaunch(slide.app)
                         }
                     },
@@ -629,7 +628,7 @@ private fun ForYou(
                         items(data.episodes, key = { it.series.key + it.code }) { ep ->
                             EpisodeCard(
                                 episode = ep,
-                                onClick = { onOpenTitle(ep.series, null) },
+                                onClick = { onOpenTitle(ep.series, null, null) },
                                 onFocus = titleFocus(ep.series),
                             )
                         }
@@ -657,7 +656,13 @@ private fun ForYou(
                 item(key = "mylist") {
                     ShelfRow("La mia lista", o) {
                         items(data.myList, key = { it.key }) { t ->
-                            PosterCard(t, DefaultAmbient, onClick = { onOpenTitle(t, null) }, onFocus = titleFocus(t))
+                            PosterCard(
+                                t,
+                                DefaultAmbient,
+                                onClick = { onOpenTitle(t, null, "mylist/${t.key}") },
+                                onFocus = titleFocus(t),
+                                shareKey = "mylist/${t.key}",
+                            )
                         }
                     }
                 }
@@ -693,7 +698,13 @@ private fun ForYou(
                 item(key = "row:" + row.app.packageName) {
                     ShelfRow("Popolari su ${row.app.label}", o, icon = row.app.icon) {
                         items(row.titles, key = { it.key }) { t ->
-                            PosterCard(t, row.app.color, onClick = { onOpenTitle(t, row.app) }, onFocus = titleFocus(t))
+                            PosterCard(
+                                t,
+                                row.app.color,
+                                onClick = { onOpenTitle(t, row.app, "row:${row.app.packageName}/${t.key}") },
+                                onFocus = titleFocus(t),
+                                shareKey = "row:${row.app.packageName}/${t.key}",
+                            )
                         }
                     }
                 }
@@ -703,20 +714,13 @@ private fun ForYou(
                 item(key = "rec:" + seed.key) {
                     ShelfRow("Perché ti interessa «${seed.title}»", o) {
                         items(titles, key = { it.key }) { t ->
-                            PosterCard(t, DefaultAmbient, onClick = { onOpenTitle(t, null) }, onFocus = titleFocus(t))
-                        }
-                    }
-                }
-            }
-            if (data.speakers.isNotEmpty() || data.playlists.isNotEmpty()) {
-                val o = order++
-                item(key = "music") {
-                    ShelfRow("Musica", o) {
-                        items(data.speakers, key = { "spk:" + it.id }) { speaker ->
-                            HaTile(entity = speaker, onClick = { onHaPress(speaker) }, onFocus = onAmbient)
-                        }
-                        items(data.playlists, key = { "pl:" + it.id }) { playlist ->
-                            PlaylistCard(playlist = playlist, onClick = { onPlaylist(playlist) }, onFocus = onAmbient)
+                            PosterCard(
+                                t,
+                                DefaultAmbient,
+                                onClick = { onOpenTitle(t, null, "rec:${seed.key}/${t.key}") },
+                                onFocus = titleFocus(t),
+                                shareKey = "rec:${seed.key}/${t.key}",
+                            )
                         }
                     }
                 }
@@ -726,7 +730,13 @@ private fun ForYou(
                 item(key = "trending") {
                     ShelfRow("Di tendenza questa settimana", o) {
                         items(data.trending, key = { it.key }) { t ->
-                            PosterCard(t, DefaultAmbient, onClick = { onOpenTitle(t, null) }, onFocus = titleFocus(t))
+                            PosterCard(
+                                t,
+                                DefaultAmbient,
+                                onClick = { onOpenTitle(t, null, "trend/${t.key}") },
+                                onFocus = titleFocus(t),
+                                shareKey = "trend/${t.key}",
+                            )
                         }
                     }
                 }
@@ -907,6 +917,7 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean, isCurrent: Boolean) {
     val title: String
     val subtitle: String
     val action: String
+    var overview = ""
     var progress = -1f
 
     when (slide) {
@@ -925,6 +936,7 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean, isCurrent: Boolean) {
             label = "In evidenza su ${slide.app.label}"
             title = slide.title.title
             subtitle = slide.title.metaLine()
+            overview = slide.title.overview
             action = "Dettagli"
         }
         is HeroSlide.App -> {
@@ -1017,6 +1029,16 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean, isCurrent: Boolean) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color.White.copy(alpha = 0.78f),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (overview.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = overview,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.72f),
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

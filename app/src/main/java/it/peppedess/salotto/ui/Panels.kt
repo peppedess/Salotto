@@ -60,7 +60,6 @@ import androidx.compose.ui.unit.dp
 import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.ChannelGuide
 import it.peppedess.salotto.data.HaEntity
-import it.peppedess.salotto.data.Playlist
 import it.peppedess.salotto.data.Profile
 import it.peppedess.salotto.ui.components.MenuEntry
 import it.peppedess.salotto.ui.components.TvCard
@@ -69,7 +68,7 @@ import kotlinx.coroutines.delay
 
 /** Volume, uscita audio e casse di casa. */
 @Composable
-internal fun AudioDialog(vm: HomeViewModel, speakers: List<HaEntity>, onDismiss: () -> Unit) {
+internal fun AudioDialog(vm: HomeViewModel, onDismiss: () -> Unit) {
     val initial = remember { vm.volume() }
     var level by remember { mutableFloatStateOf(initial.first.toFloat()) }
     var muted by remember { mutableStateOf(vm.isMuted()) }
@@ -110,37 +109,10 @@ internal fun AudioDialog(vm: HomeViewModel, speakers: List<HaEntity>, onDismiss:
                 }
                 MenuEntry(Icons.Rounded.SpeakerGroup, "Scegli l'uscita audio") { vm.openOutputSwitcher() }
                 MenuEntry(Icons.Rounded.Bluetooth, "Impostazioni Bluetooth") { vm.openBluetoothSettings() }
-                if (speakers.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
-                    Text("Casse di casa", style = MaterialTheme.typography.labelLarge)
-                    speakers.forEach { speaker ->
-                        SpeakerVolume(speaker) { v -> vm.setSpeakerVolume(speaker, v) }
-                    }
-                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Chiudi") } },
     )
-}
-
-@Composable
-private fun SpeakerVolume(speaker: HaEntity, onChange: (Float) -> Unit) {
-    var value by remember(speaker.id) { mutableFloatStateOf(speaker.volume ?: 0f) }
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Speaker, null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(speaker.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1)
-            Text(speaker.stateLabel, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-        }
-        Slider(
-            value = value,
-            onValueChange = { value = it },
-            onValueChangeFinished = { onChange(value) },
-            valueRange = 0f..1f,
-            enabled = speaker.volume != null,
-        )
-    }
 }
 
 /** Timer di spegnimento. */
@@ -191,35 +163,6 @@ internal fun SleepDialog(
                         style = MaterialTheme.typography.labelSmall,
                     )
                     MenuEntry(Icons.Rounded.PhoneAndroid, "Attiva lo spegnimento dello schermo") { onEnableAdmin() }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Chiudi") } },
-    )
-}
-
-/** Dove riprodurre una playlist: su questo dispositivo o su una cassa di casa. */
-@Composable
-internal fun PlaylistDialog(
-    playlist: Playlist,
-    speakers: List<HaEntity>,
-    onPick: (HaEntity?) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(playlist.title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MenuEntry(Icons.Rounded.PhoneAndroid, "Su questo dispositivo (Deezer)") { onPick(null) }
-                speakers.forEach { speaker ->
-                    MenuEntry(Icons.Rounded.Speaker, "Su ${speaker.name}") { onPick(speaker) }
-                }
-                if (speakers.isEmpty()) {
-                    Text(
-                        "Per suonarla sulle casse di casa scegli le casse nelle impostazioni (serve Music Assistant in Home Assistant).",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
                 }
             }
         },

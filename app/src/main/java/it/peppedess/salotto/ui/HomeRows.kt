@@ -34,7 +34,6 @@ import coil3.compose.AsyncImage
 import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.ChannelGuide
 import it.peppedess.salotto.data.EpisodeInfo
-import it.peppedess.salotto.data.Playlist
 import it.peppedess.salotto.ui.components.TvCard
 import it.peppedess.salotto.ui.components.darken
 import java.time.Instant
@@ -195,52 +194,6 @@ internal fun EpisodeCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White.copy(alpha = 0.78f),
                 maxLines = 1,
-            )
-        }
-    }
-}
-
-/** Copertina quadrata di una playlist. */
-@Composable
-internal fun PlaylistCard(
-    playlist: Playlist,
-    onClick: () -> Unit,
-    onFocus: (Color) -> Unit,
-) {
-    TvCard(
-        onClick = onClick,
-        modifier = Modifier.size(140.dp),
-        onFocus = { onFocus(Color(0xFF3A2D4A)) },
-    ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Brush.linearGradient(listOf(Color(0xFFA238FF), Color(0xFF2B1640))))
-        )
-        if (playlist.coverUrl != null) {
-            AsyncImage(playlist.coverUrl, playlist.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f)))
-        )
-        Column(
-            Modifier
-                .align(Alignment.BottomStart)
-                .padding(8.dp)
-        ) {
-            Text(
-                playlist.title,
-                style = MaterialTheme.typography.labelLarge,
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                "${playlist.tracks} brani",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.7f),
             )
         }
     }

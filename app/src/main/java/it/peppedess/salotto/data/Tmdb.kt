@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 
@@ -16,6 +17,7 @@ data class TmdbTitle(
     val backdropUrl: String?,
     val year: String,
     val rating: Double,
+    val genres: List<String> = emptyList(),
 ) {
     val key: String get() = type + id
     val kindLabel: String get() = if (type == "tv") "Serie TV" else "Film"
@@ -29,6 +31,7 @@ data class TmdbTitle(
         .put("backdrop", backdropUrl ?: "")
         .put("year", year)
         .put("rating", rating)
+        .put("genres", JSONArray(genres))
 
     companion object {
         fun fromJson(o: JSONObject) = TmdbTitle(
@@ -40,8 +43,34 @@ data class TmdbTitle(
             backdropUrl = o.optString("backdrop").ifEmpty { null },
             year = o.optString("year"),
             rating = o.optDouble("rating", 0.0),
+            genres = o.optJSONArray("genres")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty(),
         )
     }
+}
+
+data class CastMember(val name: String, val role: String, val photoUrl: String?)
+
+/** Dettagli completi di un titolo per la scheda. */
+data class TmdbDetails(
+    val tagline: String,
+    val genres: List<String>,
+    val runtimeMin: Int,
+    val seasons: Int,
+    val episodes: Int,
+    val certification: String,
+    val creators: List<String>,
+    val cast: List<CastMember>,
+    val status: String,
+) {
+    val lengthLabel: String
+        get() = when {
+            seasons > 0 -> buildString {
+                append(if (seasons == 1) "1 stagione" else "$seasons stagioni")
+                if (episodes > 0) append(" · $episodes episodi")
+            }
+            runtimeMin > 0 -> if (runtimeMin >= 60) "${runtimeMin / 60} h ${runtimeMin % 60} min" else "$runtimeMin min"
+            else -> ""
+        }
 }
 
 /** Ultimo (o prossimo) episodio di una serie. */
@@ -98,6 +127,76 @@ class TmdbClient(credential: String) {
             }
         }
         return out.distinctBy { it.id }.sortedBy { it.priority }
+    }
+
+    suspend fun details(title: TmdbTitle): TmdbDetails {
+        val tv = title.type == "tv"
+        val extra = if (tv) "aggregate_credits,content_ratings" else "credits,release_dates"
+        val o = get("/${title.type}/${title.id}", mapOf("append_to_response" to extra))
+
+        val genres = o.optJSONArray("genres")?.let { arr ->
+            (0 until arr.length()).map { str(arr.getJSONObject(it), "name") }.filter { it.isNotBlank() }
+        }.orEmpty()
+
+        val certification = if (tv) {
+            o.optJSONObject("content_ratings")?.optJSONArray("results")?.let { arr ->
+                (0 until arr.length()).map { arr.getJSONObject(it) }
+                    .firstOrNull { str(it, "iso_3166_1") == REGION }?.let { str(it, "rating") }
+            }.orEmpty()
+        } else {
+            o.optJSONObject("release_dates")?.optJSONArray("results")?.let { arr ->
+                (0 until arr.length()).map { arr.getJSONObject(it) }
+                    .firstOrNull { str(it, "iso_3166_1") == REGION }
+                    ?.optJSONArray("release_dates")?.let { dates ->
+                        (0 until dates.length()).map { str(dates.getJSONObject(it), "certification") }.firstOrNull { it.isNotBlank() }
+                    }
+            }.orEmpty()
+        }
+
+        val credits = o.optJSONObject(if (tv) "aggregate_credits" else "credits")
+        val cast = credits?.optJSONArray("cast")?.let { arr ->
+            (0 until minOf(arr.length(), 15)).map { i ->
+                val c = arr.getJSONObject(i)
+                val role = if (tv) {
+                    c.optJSONArray("roles")?.optJSONObject(0)?.let { str(it, "character") }.orEmpty()
+                } else {
+                    str(c, "character")
+                }
+                CastMember(str(c, "name"), role, image(c, "profile_path", "w185"))
+            }
+        }.orEmpty()
+
+        val creators = if (tv) {
+            o.optJSONArray("created_by")?.let { arr -> (0 until arr.length()).map { str(arr.getJSONObject(it), "name") } }.orEmpty()
+        } else {
+            credits?.optJSONArray("crew")?.let { arr ->
+                (0 until arr.length()).map { arr.getJSONObject(it) }
+                    .filter { str(it, "job") == "Director" }
+                    .map { str(it, "name") }
+            }.orEmpty()
+        }
+
+        return TmdbDetails(
+            tagline = str(o, "tagline"),
+            genres = genres,
+            runtimeMin = if (tv) {
+                o.optJSONArray("episode_run_time")?.optInt(0) ?: 0
+            } else {
+                o.optInt("runtime")
+            },
+            seasons = if (tv) o.optInt("number_of_seasons") else 0,
+            episodes = if (tv) o.optInt("number_of_episodes") else 0,
+            certification = certification,
+            creators = creators.filter { it.isNotBlank() }.distinct().take(3),
+            cast = cast.filter { it.name.isNotBlank() },
+            status = when (str(o, "status")) {
+                "Returning Series" -> "In corso"
+                "Ended" -> "Conclusa"
+                "Canceled" -> "Cancellata"
+                "In Production" -> "In produzione"
+                else -> ""
+            },
+        )
     }
 
     suspend fun recommendations(title: TmdbTitle): List<TmdbTitle> =
@@ -182,6 +281,9 @@ class TmdbClient(credential: String) {
             backdropUrl = image(o, "backdrop_path", "w1280"),
             year = date.take(4),
             rating = o.optDouble("vote_average", 0.0),
+            genres = o.optJSONArray("genre_ids")?.let { arr ->
+                (0 until arr.length()).mapNotNull { GENRES[arr.optInt(it)] }
+            }.orEmpty(),
         )
     }
 
@@ -195,6 +297,16 @@ class TmdbClient(credential: String) {
 
     private companion object {
         val HOSTS = listOf("api.themoviedb.org", "api.tmdb.org")
+
+        /** Generi TMDB (film e serie) in italiano. */
+        val GENRES = mapOf(
+            28 to "Azione", 12 to "Avventura", 16 to "Animazione", 35 to "Commedia", 80 to "Crime",
+            99 to "Documentario", 18 to "Dramma", 10751 to "Famiglia", 14 to "Fantasy", 36 to "Storia",
+            27 to "Horror", 10402 to "Musica", 9648 to "Mistero", 10749 to "Romance", 878 to "Fantascienza",
+            10770 to "Film TV", 53 to "Thriller", 10752 to "Guerra", 37 to "Western",
+            10759 to "Azione e avventura", 10762 to "Bambini", 10763 to "Notizie", 10764 to "Reality",
+            10765 to "Sci-fi e fantasy", 10766 to "Soap", 10767 to "Talk show", 10768 to "Guerra e politica",
+        )
         const val REGION = "IT"
     }
 }

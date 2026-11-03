@@ -31,7 +31,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 ottimizza Compose: interfaccia più fluida e APK più piccolo.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
         debug {
@@ -83,5 +86,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
     implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:5.1.0")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }

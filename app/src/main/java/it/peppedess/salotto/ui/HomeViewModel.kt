@@ -32,10 +32,8 @@ import android.os.PowerManager
 import android.view.KeyEvent
 import it.peppedess.salotto.MainActivity
 import it.peppedess.salotto.data.ChannelGuide
-import it.peppedess.salotto.data.DeezerClient
 import it.peppedess.salotto.data.EpgRepository
 import it.peppedess.salotto.data.EpisodeInfo
-import it.peppedess.salotto.data.Playlist
 import it.peppedess.salotto.data.Profile
 import it.peppedess.salotto.data.StatsRepository
 import it.peppedess.salotto.data.TvChannel
@@ -59,6 +57,7 @@ import it.peppedess.salotto.data.WeatherClient
 import it.peppedess.salotto.data.Prefs
 import it.peppedess.salotto.data.Settings
 import it.peppedess.salotto.data.TmdbClient
+import it.peppedess.salotto.data.TmdbDetails
 import it.peppedess.salotto.data.TmdbException
 import it.peppedess.salotto.data.TmdbTitle
 import it.peppedess.salotto.kiosk.Kiosk
@@ -92,6 +91,10 @@ data class DetailState(
     val title: TmdbTitle,
     val apps: List<AppEntry>,
     val resolving: Boolean,
+    val details: TmdbDetails? = null,
+    val similar: List<TmdbTitle> = emptyList(),
+    /** Chiave della locandina da cui si è aperta la scheda, per l'animazione condivisa. */
+    val shareKey: String? = null,
 )
 
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
@@ -109,6 +112,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
     val settings: StateFlow<Settings> = prefs.settings
+
+    private val _providerPackages = MutableStateFlow<Set<String>>(emptySet())
+
+    /** App per la riga "Le tue app" e la scheda App: solo intrattenimento, se richiesto. */
+    val listedApps: StateFlow<List<AppEntry>> =
+        combine(_apps, prefs.settings.map { it.entertainmentOnly }.distinctUntilChanged(), _providerPackages) { list, only, providers ->
+            if (!only) list else list.filter { it.entertainment || it.packageName in providers }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val continueItems: StateFlow<List<ContinueItem>> = store.items
 
     val favorites: StateFlow<List<AppEntry>> =
@@ -192,17 +203,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _epgStatus = MutableStateFlow("")
     val epgStatus: StateFlow<String> = _epgStatus.asStateFlow()
     private val epgTick = MutableStateFlow(0)
-
-    // ---- Musica ----
-    private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
-    val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
-    private val _musicStatus = MutableStateFlow("")
-    val musicStatus: StateFlow<String> = _musicStatus.asStateFlow()
-    val speakers: StateFlow<List<HaEntity>> =
-        combine(_haAll, prefs.settings.map { it.musicSpeakers }.distinctUntilChanged()) { all, ids ->
-            val map = all.associateBy { it.id }
-            ids.mapNotNull { map[it] }
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // ---- Timer ----
     val sleepEndsAt: StateFlow<Long> = SleepTimer.endsAt
@@ -346,26 +346,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                         delay(EPG_REFRESH_MS)
                     }
                 }
-        }
-
-        // Musica: playlist del profilo Deezer.
-        viewModelScope.launch {
-            prefs.settings.map { it.deezerUserId.trim() }.distinctUntilChanged().collectLatest { id ->
-                if (id.isBlank()) {
-                    _playlists.value = emptyList()
-                    _musicStatus.value = ""
-                    return@collectLatest
-                }
-                try {
-                    val list = DeezerClient.playlists(id)
-                    _playlists.value = list
-                    _musicStatus.value = if (list.isEmpty()) "Nessuna playlist pubblica" else "${list.size} playlist"
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    _musicStatus.value = "Deezer non raggiungibile — " + describe(e)
-                }
-            }
         }
 
         if (prefs.settings.value.autoUpdate) checkUpdate(manual = false)
@@ -555,6 +535,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }.filter { it.titles.isNotEmpty() }
 
         _providerRows.value = rows
+        _providerPackages.value = matched.map { it.second.packageName }.toSet()
         _trending.value = safe { client.trending() }.filter { it.posterUrl != null }
         _catalogStatus.value = if (rows.isEmpty()) {
             "Nessuna app di streaming riconosciuta"
@@ -608,19 +589,40 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         return safe { TmdbClient(key).search(query) }.filter { it.posterUrl != null }.take(20)
     }
 
-    fun openDetail(title: TmdbTitle, app: AppEntry?) {
-        _detail.value = DetailState(title, listOfNotNull(app), resolving = true)
+    fun openDetail(title: TmdbTitle, app: AppEntry?, shareKey: String? = null) {
+        _detail.value = DetailState(title, listOfNotNull(app), resolving = true, shareKey = shareKey)
         prefs.addHistory(title)
         val key = prefs.settings.value.tmdbKey.trim()
+        if (key.isBlank()) {
+            _detail.value = _detail.value?.copy(resolving = false)
+            return
+        }
+        val client = TmdbClient(key)
         viewModelScope.launch {
-            val names = if (key.isBlank()) emptyList() else safe { TmdbClient(key).watchProviders(title.type, title.id) }
+            val names = safe { client.watchProviders(title.type, title.id) }
             val apps = _apps.value
             val found = (listOfNotNull(app) + names.mapNotNull { matchApp(it, apps) }).distinctBy { it.packageName }
-            val current = _detail.value
-            if (current != null && current.title.key == title.key) {
-                _detail.value = current.copy(apps = found, resolving = false)
-            }
+            updateDetail(title) { it.copy(apps = found, resolving = false) }
         }
+        viewModelScope.launch {
+            val details = try {
+                client.details(title)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            updateDetail(title) { it.copy(details = details) }
+        }
+        viewModelScope.launch {
+            val similar = safe { client.recommendations(title) }.filter { it.posterUrl != null }.take(15)
+            updateDetail(title) { it.copy(similar = similar) }
+        }
+    }
+
+    private fun updateDetail(title: TmdbTitle, change: (DetailState) -> DetailState) {
+        val current = _detail.value
+        if (current != null && current.title.key == title.key) _detail.value = change(current)
     }
 
     fun refreshCatalog() {
@@ -758,76 +760,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 _epgStatus.value = "Guida non disponibile — " + describe(e)
             }
-        }
-    }
-
-    // ---- Musica e casse ----
-
-    fun playPlaylist(playlist: Playlist, speaker: HaEntity?) {
-        if (speaker == null) {
-            start(Intent(Intent.ACTION_VIEW, Uri.parse(playlist.webUrl)))
-            return
-        }
-        val s = prefs.settings.value
-        if (!s.haConfigured) return
-        viewModelScope.launch {
-            val client = HaClient(s.haUrl, s.haToken)
-            val viaMass = try {
-                client.callService(
-                    "music_assistant",
-                    "play_media",
-                    JSONObject()
-                        .put("entity_id", speaker.id)
-                        .put("media_id", playlist.massUri)
-                        .put("media_type", "playlist"),
-                )
-                true
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                false
-            }
-            if (!viaMass) {
-                try {
-                    client.callService(
-                        "media_player",
-                        "play_media",
-                        JSONObject()
-                            .put("entity_id", speaker.id)
-                            .put("media_content_id", playlist.webUrl)
-                            .put("media_content_type", "playlist"),
-                    )
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    toast("Non riesco ad avviare la playlist su ${speaker.name}")
-                    return@launch
-                }
-            }
-            toast("«${playlist.title}» su ${speaker.name}")
-            delay(1500)
-            refreshHa(client)
-        }
-    }
-
-    fun setSpeakerVolume(speaker: HaEntity, volume: Float) {
-        val s = prefs.settings.value
-        if (!s.haConfigured) return
-        _haAll.value = _haAll.value.map { if (it.id == speaker.id) it.copy(volume = volume) else it }
-        viewModelScope.launch {
-            runCatching {
-                HaClient(s.haUrl, s.haToken).callService(
-                    "media_player",
-                    "volume_set",
-                    JSONObject().put("entity_id", speaker.id).put("volume_level", volume.toDouble()),
-                )
-            }
-        }
-    }
-
-    fun toggleSpeaker(id: String) {
-        prefs.updateSettings { s ->
-            s.copy(musicSpeakers = if (id in s.musicSpeakers) s.musicSpeakers - id else s.musicSpeakers + id)
         }
     }
 

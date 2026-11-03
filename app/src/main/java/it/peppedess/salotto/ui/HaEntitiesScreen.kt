@@ -60,7 +60,7 @@ private val DOMAIN_LABELS = linkedMapOf(
 
 /** Scelta delle entità di Home Assistant da mostrare nella riga "Casa". */
 @Composable
-fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit, speakersMode: Boolean = false) {
+fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit) {
     BackHandler(onBack = onClose)
     val all by vm.haAll.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -69,10 +69,10 @@ fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit, speakersMode: Boole
 
     LaunchedEffect(Unit) { vm.refreshHomeAssistant() }
 
-    val selected = if (speakersMode) settings.musicSpeakers else settings.haEntities
-    val pool = if (speakersMode) all.filter { it.domain == "media_player" } else all
+    val selected = settings.haEntities
+    val pool = all
     val visible = pool.filter { filter == null || it.domain == filter }
-    val domains = if (speakersMode) emptyList() else DOMAIN_LABELS.keys.filter { d -> all.any { it.domain == d } }
+    val domains = DOMAIN_LABELS.keys.filter { d -> all.any { it.domain == d } }
 
     Column(
         Modifier
@@ -90,7 +90,7 @@ fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit, speakersMode: Boole
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (speakersMode) "Casse per la musica" else "Riga \"Casa\"",
+                    "Riga \"Casa\"",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -135,7 +135,7 @@ fun HaEntitiesScreen(vm: HomeViewModel, onClose: () -> Unit, speakersMode: Boole
             items(visible, key = { it.id }) { entity ->
                 val checked = entity.id in selected
                 TvCard(
-                    onClick = { if (speakersMode) vm.toggleSpeaker(entity.id) else vm.toggleHaEntity(entity.id) },
+                    onClick = { vm.toggleHaEntity(entity.id) },
                     modifier = Modifier.fillMaxWidth().height(60.dp),
                     shape = RoundedCornerShape(16.dp),
                     focusScale = 1.01f,

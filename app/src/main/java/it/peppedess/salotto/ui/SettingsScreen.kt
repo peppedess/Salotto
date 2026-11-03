@@ -62,10 +62,9 @@ import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Group
-import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.LiveTv
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.NotificationsActive
-import androidx.compose.material.icons.rounded.Speaker
 import androidx.compose.material.icons.rounded.SystemUpdate
 import it.peppedess.salotto.ui.components.PinDialog
 import it.peppedess.salotto.ui.components.TextInputDialog
@@ -78,7 +77,6 @@ fun SettingsScreen(
     vm: HomeViewModel,
     onClose: () -> Unit,
     onHaEntities: () -> Unit,
-    onSpeakers: () -> Unit,
     onProfiles: () -> Unit,
     onStats: () -> Unit,
 ) {
@@ -95,14 +93,12 @@ fun SettingsScreen(
     var haTokenDialog by remember { mutableStateOf(false) }
     val haStatus by vm.haStatus.collectAsStateWithLifecycle()
     val weather by vm.weather.collectAsStateWithLifecycle()
-    val musicStatus by vm.musicStatus.collectAsStateWithLifecycle()
     val epgStatus by vm.epgStatus.collectAsStateWithLifecycle()
     val adminActive by vm.adminActive.collectAsStateWithLifecycle()
     val statsAllowed by vm.statsPermission.collectAsStateWithLifecycle()
     val update by vm.update.collectAsStateWithLifecycle()
     val updateStatus by vm.updateStatus.collectAsStateWithLifecycle()
     val profiles by vm.profiles.collectAsStateWithLifecycle()
-    var deezerDialog by remember { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val catalogStatus by vm.catalogStatus.collectAsStateWithLifecycle()
 
@@ -166,6 +162,16 @@ fun SettingsScreen(
                     subtitle = "Di base Salotto resta in orizzontale, come una TV",
                     checked = settings.allowPortrait,
                     onClick = { vm.updateSettings { s -> s.copy(allowPortrait = !s.allowPortrait) } },
+                )
+            }
+
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Movie,
+                    title = "Solo app di intrattenimento",
+                    subtitle = "Nella riga \"Le tue app\" e nella scheda App: video, streaming, TV e giochi",
+                    checked = settings.entertainmentOnly,
+                    onClick = { vm.updateSettings { s -> s.copy(entertainmentOnly = !s.entertainmentOnly) } },
                 )
             }
 
@@ -318,34 +324,6 @@ fun SettingsScreen(
                     subtitle = "${profiles.size} profili · preferite, lista e regole separate",
                     onClick = onProfiles,
                 )
-            }
-
-            item { SectionTitle("Musica") }
-            item {
-                SettingRow(
-                    icon = Icons.Rounded.LibraryMusic,
-                    title = "Profilo Deezer",
-                    subtitle = if (settings.deezerUserId.isBlank()) {
-                        "Inserisci il tuo ID utente per vedere le playlist"
-                    } else {
-                        "ID ${settings.deezerUserId}" + if (musicStatus.isNotBlank()) " · $musicStatus" else ""
-                    },
-                    onClick = { deezerDialog = true },
-                )
-            }
-            if (settings.haConfigured) {
-                item {
-                    SettingRow(
-                        icon = Icons.Rounded.Speaker,
-                        title = "Casse per la musica",
-                        subtitle = if (settings.musicSpeakers.isEmpty()) {
-                            "Scegli i lettori di Home Assistant (Sonos, Music Assistant…)"
-                        } else {
-                            "${settings.musicSpeakers.size} casse"
-                        },
-                        onClick = onSpeakers,
-                    )
-                }
             }
 
             item { SectionTitle("TV e film") }
@@ -540,20 +518,6 @@ fun SettingsScreen(
                 message = if (token.isBlank()) "Token rimosso." else "Token salvato."
             },
             onDismiss = { haTokenDialog = false },
-        )
-    }
-
-    if (deezerDialog) {
-        TextInputDialog(
-            title = "Profilo Deezer",
-            label = "ID utente",
-            initial = settings.deezerUserId,
-            help = "Deezer → Profilo → Condividi: è il numero alla fine del link. Le playlist devono essere pubbliche.",
-            onConfirm = { id ->
-                vm.updateSettings { s -> s.copy(deezerUserId = id.filter { c -> c.isDigit() }) }
-                deezerDialog = false
-            },
-            onDismiss = { deezerDialog = false },
         )
     }
 
