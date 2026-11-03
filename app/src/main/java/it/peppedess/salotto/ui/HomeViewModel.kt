@@ -120,12 +120,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         combine(_apps, prefs.settings.map { it.entertainmentOnly }.distinctUntilChanged(), _providerPackages) { list, only, providers ->
             if (!only) list else list.filter { it.entertainment || it.packageName in providers }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val continueItems: StateFlow<List<ContinueItem>> = store.items
+    /** Solo video: la musica (Deezer, Spotify…) resta fuori da "Continua a guardare". */
+    val continueItems: StateFlow<List<ContinueItem>> =
+        store.items.map { list -> list.filterNot { isMusicApp(it.packageName) } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val favorites: StateFlow<List<AppEntry>> =
         combine(_apps, prefs.favorites) { list, keys ->
             val map = list.associateBy { it.key }
-            keys.mapNotNull { map[it] }
+            keys.mapNotNull { map[it] }.filterNot { isMusicApp(it.packageName) }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _notificationAccess = MutableStateFlow(false)
@@ -895,6 +898,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openUsageAccess() = start(Intent(AndroidSettings.ACTION_USAGE_ACCESS_SETTINGS))
 
+    /** App di musica e audio: pacchetti noti o categoria "Audio" di Android. */
+    fun isMusicApp(pkg: String): Boolean = musicCache.getOrPut(pkg) {
+        if (MUSIC_PACKAGES.any { pkg.startsWith(it) }) return@getOrPut true
+        val info = runCatching { ctx.packageManager.getApplicationInfo(pkg, 0) }.getOrNull()
+        info?.category == android.content.pm.ApplicationInfo.CATEGORY_AUDIO
+    }
+
     fun appByPackage(pkg: String): AppEntry? = _apps.value.firstOrNull { it.packageName == pkg }
 
     // ---- Avvio app e contenuti ----
@@ -1067,8 +1077,16 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             "com.dazn",
             "tv.twitch.android.app",
             "com.plexapp.android",
-            "com.spotify.music",
-            "deezer.android.app",
+        )
+
+        /** Statico: viene usato anche durante la costruzione del ViewModel. */
+        private val musicCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+        val MUSIC_PACKAGES = listOf(
+            "deezer.", "com.spotify", "com.google.android.apps.youtube.music", "com.amazon.mp3",
+            "com.apple.android.music", "com.soundcloud", "com.aspiro.tidal", "com.qobuz",
+            "com.audible", "com.google.android.apps.podcasts", "au.com.shiftyjelly.pocketcasts",
+            "fm.castbox", "com.shazam", "com.sonos", "tunein.player", "com.maxmpz.audioplayer",
         )
 
         /** App di musica o video brevi: qui la copertina originale è già quella giusta. */

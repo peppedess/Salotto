@@ -71,7 +71,6 @@ class AppRepository(private val context: Context) {
         @Suppress("DEPRECATION")
         if (ai.flags and ApplicationInfo.FLAG_IS_GAME != 0) return true
         if (KNOWN.any { pkg.startsWith(it) }) return true
-        if (pm.getLeanbackLaunchIntentForPackage(pkg) != null) return true
         val words = label.lowercase(Locale.ITALIAN).split(' ', '-', '+', '.', ':')
         return words.any { it in KEYWORDS }
     }
@@ -109,8 +108,11 @@ class AppRepository(private val context: Context) {
         val EXCLUDED = listOf(
             "com.google.android.apps.youtube.music", "com.google.android.apps.youtube.creator",
             "com.spotify", "deezer.", "com.amazon.mp3", "com.android.vending",
+            "com.futuremark", "com.finalwire", "com.apkmirror", "org.fdroid", "com.primatelabs",
+            "com.antutu", "com.google.android.apps.photos", "com.android.camera", "com.miui.",
+            "com.xiaomi.", "com.android.", "com.google.android.apps.youtube.creator",
         )
-        val KEYWORDS = setOf("tv", "video", "film", "cinema", "movie", "movies", "stream", "streaming", "anime", "serie", "player", "giochi", "games")
+        val KEYWORDS = setOf("tv", "film", "cinema", "movie", "movies", "streaming", "anime", "serie")
         const val ICON_PX = 192
         const val BANNER_PX = 480f
     }

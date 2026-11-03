@@ -102,6 +102,7 @@ class MediaListenerService : NotificationListenerService() {
     }
 
     private fun snapshot(controller: MediaController) {
+        if (isMusic(controller.packageName)) return
         val md = controller.metadata ?: return
         val title = md.getString(MediaMetadata.METADATA_KEY_TITLE)
             ?: md.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
@@ -169,6 +170,14 @@ class MediaListenerService : NotificationListenerService() {
         }
     }
 
+    private val musicCache = HashMap<String, Boolean>()
+
+    private fun isMusic(pkg: String): Boolean = musicCache.getOrPut(pkg) {
+        if (MUSIC_PREFIXES.any { pkg.startsWith(it) }) return@getOrPut true
+        val info = runCatching { packageManager.getApplicationInfo(pkg, 0) }.getOrNull()
+        info?.category == android.content.pm.ApplicationInfo.CATEGORY_AUDIO
+    }
+
     private fun loadUri(uri: String): Bitmap? = runCatching {
         val parsed = Uri.parse(uri)
         val stream = when (parsed.scheme) {
@@ -183,6 +192,13 @@ class MediaListenerService : NotificationListenerService() {
     }.getOrNull()
 
     companion object {
+        private val MUSIC_PREFIXES = listOf(
+            "deezer.", "com.spotify", "com.google.android.apps.youtube.music", "com.amazon.mp3",
+            "com.apple.android.music", "com.soundcloud", "com.aspiro.tidal", "com.qobuz",
+            "com.audible", "com.google.android.apps.podcasts", "au.com.shiftyjelly.pocketcasts",
+            "fm.castbox", "com.sonos", "tunein.player",
+        )
+
         /** Controller delle sessioni ancora vive, per riprendere la riproduzione. */
         val active = ConcurrentHashMap<String, MediaController>()
 

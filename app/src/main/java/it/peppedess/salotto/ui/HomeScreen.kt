@@ -83,6 +83,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -271,13 +272,13 @@ fun HomeScreen(
             if (art != null) {
                 // Immagine piccola ingrandita: già morbida, così la sfocatura costa poco.
                 AsyncImage(
-                    model = ImageRequest.Builder(context).data(art).size(160, 90).build(),
+                    model = ImageRequest.Builder(context).data(art).size(48, 27).build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
+                    filterQuality = FilterQuality.Low,
                     modifier = Modifier
                         .fillMaxSize()
-                        .blur(24.dp)
-                        .graphicsLayer { alpha = if (Build.VERSION.SDK_INT >= 31) 0.4f else 0.18f },
+                        .graphicsLayer { alpha = 0.32f },
                 )
             }
         }

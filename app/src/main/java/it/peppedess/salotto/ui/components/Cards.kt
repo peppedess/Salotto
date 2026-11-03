@@ -153,17 +153,22 @@ fun TvCard(
 
 @Composable
 fun ShelfRow(title: String, order: Int, icon: ImageBitmap? = null, content: LazyListScope.() -> Unit) {
-    val appear = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        delay(order.coerceAtMost(8) * 70L)
-        appear.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessLow))
+    // L'ingresso a cascata si vede solo la prima volta: scorrendo le righe restano visibili.
+    val firstTime = remember(title) { title !in shownRows }
+    val appear = remember(title) { Animatable(if (firstTime) 0f else 1f) }
+    LaunchedEffect(title) {
+        if (firstTime) {
+            shownRows += title
+            delay(order.coerceAtMost(5) * 45L)
+            appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
+        }
     }
     Column(
         Modifier
             .fillMaxWidth()
             .graphicsLayer {
                 alpha = appear.value.coerceIn(0f, 1f)
-                translationY = (1f - appear.value) * 80f
+                translationY = (1f - appear.value) * 40f
             }
     ) {
         Row(
@@ -326,6 +331,8 @@ fun ContinueCard(
         }
     }
 }
+
+private val shownRows = mutableSetOf<String>()
 
 /**
  * Locandina di un film o una serie. Con il D-pad, quando è selezionata si allarga
