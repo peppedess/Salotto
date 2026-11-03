@@ -57,6 +57,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -383,25 +386,37 @@ fun BrowseScreen(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val full = if (narrow) (maxHeight * 0.48f).coerceIn(260.dp, 520.dp) else (maxHeight * 0.56f).coerceIn(200.dp, 470.dp)
         val compact = if (narrow) (maxHeight * 0.24f).coerceIn(130.dp, 260.dp) else (maxHeight * 0.30f).coerceIn(110.dp, 280.dp)
+        // Col dito non c'è un elemento selezionato: scorrendo, l'intestazione sparisce del tutto
+        // e lo sfondo si attenua, così non restano informazioni che non c'entrano con le righe.
+        val hideHeader = collapsed && pinned == null
         val headerHeight by animateDpAsState(
-            targetValue = if (collapsed) compact else full,
+            targetValue = when {
+                hideHeader -> 0.dp
+                collapsed -> compact
+                else -> full
+            },
             animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
             label = "header",
         )
+        val backdropAlpha by animateFloatAsState(if (hideHeader) 0.22f else 1f, tween(350), label = "backdropAlpha")
 
-        Backdrop(spotlight, narrow)
+        Backdrop(spotlight, narrow, backdropAlpha)
 
         Column(Modifier.fillMaxSize()) {
-            Header(
-                spotlight = spotlight,
-                height = headerHeight,
-                topInset = if (collapsed) 12.dp else topBarHeight,
-                compact = collapsed,
-                dots = if (pinned == null && featured.size > 1) featured.size else 0,
-                dotIndex = featuredIndex % featured.size.coerceAtLeast(1),
-                onAction = { shown?.let(onItem) },
-                onFocusChange = { headerFocused = it },
-            )
+            if (headerHeight > 2.dp) {
+                Header(
+                    spotlight = spotlight,
+                    height = headerHeight,
+                    topInset = if (collapsed) 12.dp else topBarHeight,
+                    compact = collapsed,
+                    dots = if (pinned == null && featured.size > 1) featured.size else 0,
+                    dotIndex = featuredIndex % featured.size.coerceAtLeast(1),
+                    onAction = { shown?.let(onItem) },
+                    onFocusChange = { headerFocused = it },
+                )
+            } else {
+                Spacer(Modifier.height(8.dp))
+            }
 
             val density = LocalDensity.current
             val verticalPivot = remember(density) { with(density) { pivotSpec(44.dp.toPx()) } }
@@ -448,65 +463,89 @@ fun BrowseScreen(
 }
 
 @Composable
-private fun Backdrop(spotlight: Spotlight?, narrow: Boolean) {
+private fun Backdrop(spotlight: Spotlight?, narrow: Boolean, alpha: Float) {
     val context = LocalContext.current
-    Box(Modifier.fillMaxSize()) {
-        val tint = spotlight?.tint ?: DefaultAmbient
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Bg)
-                .drawBehind {
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(tint.copy(alpha = 0.45f), Color.Transparent),
-                            center = Offset(size.width * 0.8f, 0f),
-                            radius = size.maxDimension * 0.9f,
-                        )
-                    )
-                }
-        )
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Bg)
+    ) {
         Crossfade(
             targetState = spotlight?.key to spotlight?.art,
             animationSpec = tween(450),
             label = "backdrop",
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .fillMaxWidth(if (narrow) 1f else 0.74f)
-                .fillMaxHeight(if (narrow) 0.5f else 0.82f),
+                .fillMaxSize()
+                .graphicsLayer { this.alpha = alpha },
         ) { (_, art) ->
-            Box(Modifier.fillMaxSize()) {
+            val tint = spotlight?.tint ?: DefaultAmbient
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .drawBehind {
+                        drawRect(
+                            Brush.radialGradient(
+                                listOf(tint.copy(alpha = 0.45f), Color.Transparent),
+                                center = Offset(size.width * 0.8f, 0f),
+                                radius = size.maxDimension * 0.9f,
+                            )
+                        )
+                    }
+            ) {
+                val align = if (narrow) Alignment.TopCenter else Alignment.TopEnd
                 when (art) {
                     null -> Unit
-                    is ImageBitmap -> Image(art, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    is ImageBitmap -> Image(art, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alignment = align)
                     else -> AsyncImage(
                         model = ImageRequest.Builder(context).data(art).size(1280, 720).build(),
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,
-                    )
-                }
-                // Bordi sfumati: a sinistra verso il testo, in basso verso le righe.
-                if (narrow) {
-                    // In verticale il testo sta sotto l'immagine: sfuma solo verso il basso.
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(Brush.verticalGradient(0f to Bg.copy(alpha = 0.55f), 0.3f to Color.Transparent, 0.55f to Bg.copy(alpha = 0.6f), 1f to Bg))
-                    )
-                } else {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(Brush.horizontalGradient(0f to Bg, 0.35f to Bg.copy(alpha = 0.55f), 0.7f to Color.Transparent))
-                    )
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to Bg))
+                        alignment = align,
                     )
                 }
             }
+        }
+        // Sfumature su tutto lo schermo, indipendenti dall'immagine: nessun bordo visibile.
+        if (narrow) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Bg.copy(alpha = 0.5f),
+                            0.22f to Color.Transparent,
+                            0.45f to Bg.copy(alpha = 0.75f),
+                            0.7f to Bg,
+                        )
+                    )
+            )
+        } else {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            0f to Bg.copy(alpha = 0.97f),
+                            0.3f to Bg.copy(alpha = 0.82f),
+                            0.6f to Bg.copy(alpha = 0.2f),
+                            0.85f to Color.Transparent,
+                        )
+                    )
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Bg.copy(alpha = 0.35f),
+                            0.15f to Color.Transparent,
+                            0.45f to Color.Transparent,
+                            0.75f to Bg.copy(alpha = 0.88f),
+                            1f to Bg,
+                        )
+                    )
+            )
         }
     }
 }
@@ -528,6 +567,7 @@ private fun Header(
         Modifier
             .fillMaxWidth()
             .height(height)
+            .clipToBounds()
             .padding(start = start, end = start, top = topInset, bottom = 6.dp)
             .onFocusChanged { onFocusChange(it.hasFocus) }
     ) {
