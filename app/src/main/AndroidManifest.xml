@@ -38,6 +38,7 @@
     </queries>
 
     <application
+        android:name=".SalottoApplication"
         android:allowBackup="true"
         android:banner="@drawable/banner"
         android:icon="@mipmap/ic_launcher"

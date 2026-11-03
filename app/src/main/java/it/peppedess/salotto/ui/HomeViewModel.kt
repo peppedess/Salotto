@@ -197,7 +197,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             _catalogStatus.value = if (e.code == 401) "Chiave non valida" else "Errore TMDB (${e.code})"
             return
         } catch (e: Exception) {
-            _catalogStatus.value = "TMDB non raggiungibile"
+            _catalogStatus.value = "TMDB non raggiungibile — " + describe(e)
             return
         }
 
@@ -499,6 +499,20 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 .replace(Regex("""[«»“”"]"""), " ")
                 .replace(Regex("""\s+"""), " ")
                 .trim(' ', ':', '-', '·', ',')
+
+        fun describe(e: Throwable): String {
+            val root = generateSequence(e) { it.cause }.last()
+            val kind = when (root) {
+                is java.net.UnknownHostException -> "dominio non risolto (DNS o blocco annunci)"
+                is java.net.ConnectException -> "connessione rifiutata"
+                is java.net.SocketTimeoutException -> "tempo scaduto"
+                is javax.net.ssl.SSLException -> "errore SSL (connessione intercettata?)"
+                is SecurityException -> "permesso di rete mancante"
+                else -> root.javaClass.simpleName
+            }
+            val detail = root.message?.take(80)?.let { ": $it" }.orEmpty()
+            return kind + detail
+        }
 
         fun normalize(s: String): String =
             s.lowercase().replace("+", "plus").filter { it.isLetterOrDigit() }

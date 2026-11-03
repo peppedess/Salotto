@@ -2,11 +2,10 @@ package it.peppedess.salotto.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Request
 import org.json.JSONObject
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 
 data class TmdbTitle(
     val id: Int,
@@ -82,29 +81,33 @@ class TmdbClient(credential: String) {
         return out.sortedBy { it.second }.map { it.first }.distinct()
     }
 
+    /** Prova l'host principale e poi quello alternativo ufficiale (api.tmdb.org). */
     private suspend fun get(path: String, params: Map<String, String> = emptyMap()): JSONObject =
         withContext(Dispatchers.IO) {
-            val query = buildString {
-                append("language=it-IT")
-                params.forEach { (k, v) ->
-                    append('&').append(k).append('=').append(URLEncoder.encode(v, "UTF-8"))
+            var lastError: IOException? = null
+            for (host in HOSTS) {
+                val url = "https://$host/3$path".toHttpUrl().newBuilder().apply {
+                    addQueryParameter("language", "it-IT")
+                    params.forEach { (k, v) -> addQueryParameter(k, v) }
+                    if (!bearer) addQueryParameter("api_key", credential)
+                }.build()
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/json")
+                    .apply { if (bearer) header("Authorization", "Bearer $credential") }
+                    .build()
+                try {
+                    Net.client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) throw TmdbException(response.code)
+                        return@withContext JSONObject(response.body?.string().orEmpty())
+                    }
+                } catch (e: TmdbException) {
+                    throw e
+                } catch (e: IOException) {
+                    lastError = e
                 }
-                if (!bearer) append("&api_key=").append(URLEncoder.encode(credential, "UTF-8"))
             }
-            val conn = (URL("$BASE$path?$query").openConnection() as HttpURLConnection).apply {
-                connectTimeout = 10_000
-                readTimeout = 10_000
-                setRequestProperty("Accept", "application/json")
-                if (bearer) setRequestProperty("Authorization", "Bearer $credential")
-            }
-            try {
-                val code = conn.responseCode
-                if (code !in 200..299) throw TmdbException(code)
-                val body = conn.inputStream.bufferedReader().use { it.readText() }
-                JSONObject(body)
-            } finally {
-                conn.disconnect()
-            }
+            throw lastError ?: IOException("Nessun host TMDB raggiungibile")
         }
 
     private fun parseList(json: JSONObject, defaultType: String?): List<TmdbTitle> {
@@ -140,7 +143,7 @@ class TmdbClient(credential: String) {
         if (!o.has(key) || o.isNull(key)) "" else o.optString(key)
 
     private companion object {
-        const val BASE = "https://api.themoviedb.org/3"
+        val HOSTS = listOf("api.themoviedb.org", "api.tmdb.org")
         const val REGION = "IT"
     }
 }
