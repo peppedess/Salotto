@@ -123,6 +123,7 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 internal val DefaultAmbient = Color(0xFF243044)
+private val TOP_BAR_HEIGHT = 72.dp
 
 private sealed interface HeroSlide {
     val key: String
@@ -217,7 +218,11 @@ fun HomeScreen(
     var showSleep by remember { mutableStateOf(false) }
     var showCastHelp by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
+    // La barra si nasconde quando si scorre, ma resta sopra la lista: le misure non cambiano,
+    // così lo scorrimento non "rimbalza" verso l'alto.
+    val scrolled by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 120 }
+    }
 
     LaunchedEffect(homeTick) {
         tab = 0
@@ -297,25 +302,10 @@ fun HomeScreen(
                 }
         )
 
-        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
-            AnimatedVisibility(
-                visible = !scrolled || tab != 0 || profile.kids,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-            ) {
-                TopBar(
-                    tab = tab,
-                    profile = profile,
-                    weather = weather,
-                    sleepEndsAt = sleepEndsAt,
-                    kidsRemaining = kidsRemaining,
-                    onTab = { tab = it },
-                    onSearch = onSearch,
-                    onSettings = onSettings,
-                    onProfiles = onProfiles,
-                    onSleep = { showSleep = true },
-                )
-            }
+        val barVisible = !scrolled || tab != 0 || profile.kids
+        val barShift by animateFloatAsState(if (barVisible) 0f else 1f, tween(260), label = "bar")
+        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
+            Box(Modifier.fillMaxSize()) {
             if (profile.kids) {
                 KidsHome(profile = profile, apps = apps, onLaunch = vm::launch)
             } else {
@@ -350,6 +340,31 @@ fun HomeScreen(
                         AllApps(apps = listed, onAmbient = setAmbient, onLaunch = vm::launch, onAppMenu = onAppMenu)
                     }
                 }
+            }
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(TOP_BAR_HEIGHT)
+                    .graphicsLayer {
+                        translationY = -size.height * barShift
+                        alpha = 1f - barShift
+                    }
+                    .background(Brush.verticalGradient(0f to Bg.copy(alpha = 0.85f), 1f to Color.Transparent)),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                TopBar(
+                    tab = tab,
+                    profile = profile,
+                    weather = weather,
+                    sleepEndsAt = sleepEndsAt,
+                    kidsRemaining = kidsRemaining,
+                    onTab = { tab = it },
+                    onSearch = onSearch,
+                    onSettings = onSettings,
+                    onProfiles = onProfiles,
+                    onSleep = { showSleep = true },
+                )
             }
         }
     }
@@ -497,7 +512,7 @@ private fun KidsHome(profile: Profile, apps: List<AppEntry>, onLaunch: (AppEntry
         profile.allowedApps.mapNotNull { byPkg[it] }
     }
     if (allowed.isEmpty()) {
-        Box(Modifier.fillMaxSize().padding(40.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = TOP_BAR_HEIGHT + 40.dp, bottom = 40.dp), contentAlignment = Alignment.Center) {
             Text(
                 "Nessuna app scelta per questo profilo. Chiedi a un adulto di sceglierle in Impostazioni → Profili.",
                 style = MaterialTheme.typography.titleMedium,
@@ -509,7 +524,7 @@ private fun KidsHome(profile: Profile, apps: List<AppEntry>, onLaunch: (AppEntry
     LazyVerticalGrid(
         columns = GridCells.Adaptive(200.dp),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = 20.dp, bottom = 40.dp),
+        contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = TOP_BAR_HEIGHT + 20.dp, bottom = 40.dp),
         horizontalArrangement = Arrangement.spacedBy(22.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
@@ -563,7 +578,7 @@ private fun ForYou(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 40.dp),
+            contentPadding = PaddingValues(top = TOP_BAR_HEIGHT, bottom = 40.dp),
         ) {
             var order = 1
             item(key = "hero") {
@@ -1141,7 +1156,7 @@ private fun AllApps(
     LazyVerticalGrid(
         columns = GridCells.Adaptive(170.dp),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = 16.dp, bottom = 40.dp),
+        contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = TOP_BAR_HEIGHT + 16.dp, bottom = 40.dp),
         horizontalArrangement = Arrangement.spacedBy(18.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
