@@ -1,0 +1,53 @@
+name: Compila Salotto
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compila APK
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon 2>&1 | tee build.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Errori
+        if: failure()
+        shell: bash
+        run: |
+          grep -E '^e: ' build.log || tail -n 60 build.log
+
+      - name: Pubblica APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="Salotto-${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$APK"
+          gh release create "build-${{ github.run_number }}" "$APK" \
+            --title "Salotto build ${{ github.run_number }}" \
+            --notes "Commit ${{ github.sha }}" \
+            --latest
