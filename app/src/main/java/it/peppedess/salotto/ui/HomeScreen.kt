@@ -12,8 +12,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -45,7 +43,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Cast
@@ -184,7 +181,6 @@ fun HomeScreen(
     onSettings: () -> Unit,
     onAppMenu: (AppEntry) -> Unit,
     onOpenTitle: (TmdbTitle, AppEntry?) -> Unit,
-    onAssistant: () -> Unit,
     onStats: () -> Unit,
     onProfiles: () -> Unit,
 ) {
@@ -206,7 +202,6 @@ fun HomeScreen(
     val live by vm.liveGuide.collectAsStateWithLifecycle()
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     val speakers by vm.speakers.collectAsStateWithLifecycle()
-    val nowPlaying by vm.nowPlaying.collectAsStateWithLifecycle()
     val sleepEndsAt by vm.sleepEndsAt.collectAsStateWithLifecycle()
     val adminActive by vm.adminActive.collectAsStateWithLifecycle()
     val update by vm.update.collectAsStateWithLifecycle()
@@ -304,7 +299,6 @@ fun HomeScreen(
                     onTab = { tab = it },
                     onSearch = onSearch,
                     onSettings = onSettings,
-                    onAssistant = onAssistant,
                     onProfiles = onProfiles,
                     onSleep = { showSleep = true },
                 )
@@ -331,7 +325,6 @@ fun HomeScreen(
                             onChannelMenu = { channelMenu = it },
                             onPlaylist = { playlistMenu = it },
                             onInstallUpdate = { vm.installUpdate() },
-                            onAssistant = onAssistant,
                             onSleep = { showSleep = true },
                             onAudio = { showAudio = true },
                             onStats = onStats,
@@ -345,26 +338,6 @@ fun HomeScreen(
                         AllApps(apps = apps, onAmbient = setAmbient, onLaunch = vm::launch, onAppMenu = onAppMenu)
                     }
                 }
-            }
-        }
-
-        val np = nowPlaying
-        AnimatedVisibility(
-            visible = np != null && !profile.kids,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 14.dp),
-        ) {
-            if (np != null) {
-                NowPlayingBar(
-                    nowPlaying = np,
-                    app = byPkg[np.packageName],
-                    onCommand = vm::mediaCommand,
-                    onOpen = vm::openNowPlayingApp,
-                    onAudio = { showAudio = true },
-                )
             }
         }
     }
@@ -458,7 +431,6 @@ private fun TopBar(
     onTab: (Int) -> Unit,
     onSearch: (Boolean) -> Unit,
     onSettings: () -> Unit,
-    onAssistant: () -> Unit,
     onProfiles: () -> Unit,
     onSleep: () -> Unit,
 ) {
@@ -508,7 +480,6 @@ private fun TopBar(
             }
             TvPill(text = "Cerca", icon = Icons.Rounded.Search, onClick = { onSearch(false) })
             TvIconButton(Icons.Rounded.Mic, "Ricerca vocale", onClick = { onSearch(true) })
-            TvIconButton(Icons.Rounded.AutoAwesome, "Assistente", onClick = onAssistant)
         }
         WeatherChip(weather, Modifier.padding(start = 8.dp))
         Clock(Modifier.padding(horizontal = 8.dp))
@@ -565,7 +536,6 @@ private fun ForYou(
     onChannelMenu: (ChannelGuide) -> Unit,
     onPlaylist: (Playlist) -> Unit,
     onInstallUpdate: () -> Unit,
-    onAssistant: () -> Unit,
     onSleep: () -> Unit,
     onAudio: () -> Unit,
     onStats: () -> Unit,
@@ -593,7 +563,7 @@ private fun ForYou(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 110.dp),
+            contentPadding = PaddingValues(bottom = 40.dp),
         ) {
             var order = 1
             item(key = "hero") {
@@ -775,9 +745,6 @@ private fun ForYou(
                 val o = order++
                 item(key = "tools") {
                     ShelfRow("Strumenti", o) {
-                        item(key = "t-ai") {
-                            ToolCard(Icons.Rounded.AutoAwesome, "Assistente", "Chiedi cosa guardare", Color(0xFF7C4DFF), onAssistant, onAmbient)
-                        }
                         item(key = "t-sleep") {
                             ToolCard(
                                 Icons.Rounded.Bedtime,

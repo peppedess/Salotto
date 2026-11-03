@@ -31,25 +31,19 @@ import android.media.MediaRouter2
 import android.os.PowerManager
 import android.view.KeyEvent
 import it.peppedess.salotto.MainActivity
-import it.peppedess.salotto.data.AssistantClient
-import it.peppedess.salotto.data.AssistantException
 import it.peppedess.salotto.data.ChannelGuide
-import it.peppedess.salotto.data.ChatMessage
 import it.peppedess.salotto.data.DeezerClient
 import it.peppedess.salotto.data.EpgRepository
 import it.peppedess.salotto.data.EpisodeInfo
-import it.peppedess.salotto.data.HaAction
 import it.peppedess.salotto.data.Playlist
 import it.peppedess.salotto.data.Profile
 import it.peppedess.salotto.data.StatsRepository
-import it.peppedess.salotto.data.TitleHint
 import it.peppedess.salotto.data.TvChannel
 import it.peppedess.salotto.data.TvChannels
 import it.peppedess.salotto.data.UpdateInfo
 import it.peppedess.salotto.data.Updater
 import it.peppedess.salotto.data.WeekStats
 import it.peppedess.salotto.service.DailyWorker
-import it.peppedess.salotto.service.NowPlaying
 import it.peppedess.salotto.service.SleepTimer
 import kotlinx.coroutines.Dispatchers
 import org.json.JSONObject
@@ -85,8 +79,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-
-enum class MediaCommand { PlayPause, Next, Previous }
 
 /** Riga "Popolari su …" per un servizio di streaming installato. */
 data class ProviderRow(
@@ -212,8 +204,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             ids.mapNotNull { map[it] }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    // ---- Riproduzione, audio e timer ----
-    val nowPlaying: StateFlow<NowPlaying?> = MediaListenerService.nowPlaying.asStateFlow()
+    // ---- Timer ----
     val sleepEndsAt: StateFlow<Long> = SleepTimer.endsAt
     private val _adminActive = MutableStateFlow(false)
     val adminActive: StateFlow<Boolean> = _adminActive.asStateFlow()
@@ -224,14 +215,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _updateStatus = MutableStateFlow("")
     val updateStatus: StateFlow<String> = _updateStatus.asStateFlow()
     private var lastUpdateCheck = 0L
-
-    // ---- Assistente ----
-    private val _chat = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val chat: StateFlow<List<ChatMessage>> = _chat.asStateFlow()
-    private val _assistantBusy = MutableStateFlow(false)
-    val assistantBusy: StateFlow<Boolean> = _assistantBusy.asStateFlow()
-    private val _assistantTitles = MutableStateFlow<List<TmdbTitle>>(emptyList())
-    val assistantTitles: StateFlow<List<TmdbTitle>> = _assistantTitles.asStateFlow()
 
     // ---- Statistiche ----
     private val _stats = MutableStateFlow<WeekStats?>(null)
@@ -848,38 +831,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---- Ora in riproduzione e audio ----
-
-    fun mediaCommand(command: MediaCommand) {
-        val np = MediaListenerService.nowPlaying.value
-        val controls = np?.let { MediaListenerService.active[it.packageName] }?.transportControls
-        if (controls != null) {
-            runCatching {
-                when (command) {
-                    MediaCommand.PlayPause -> if (np?.playing == true) controls.pause() else controls.play()
-                    MediaCommand.Next -> controls.skipToNext()
-                    MediaCommand.Previous -> controls.skipToPrevious()
-                }
-            }
-            return
-        }
-        val code = when (command) {
-            MediaCommand.PlayPause -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
-            MediaCommand.Next -> KeyEvent.KEYCODE_MEDIA_NEXT
-            MediaCommand.Previous -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
-        }
-        audio()?.let {
-            it.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
-            it.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
-        }
-    }
-
-    fun openNowPlayingApp() {
-        MediaListenerService.nowPlaying.value?.let { np ->
-            val item = store.items.value.firstOrNull { it.packageName == np.packageName && it.title == np.title }
-            if (item != null) resume(item) else launchPackage(np.packageName)
-        }
-    }
+    // ---- Audio ----
 
     private fun audio(): AudioManager? = ctx.getSystemService(AudioManager::class.java)
 
@@ -990,97 +942,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 _updateStatus.value = "Aggiornamento non riuscito — " + describe(e)
             }
         }
-    }
-
-    // ---- Assistente ----
-
-    fun clearChat() {
-        _chat.value = emptyList()
-        _assistantTitles.value = emptyList()
-    }
-
-    fun ask(text: String) {
-        val question = text.trim()
-        val key = prefs.settings.value.anthropicKey.trim()
-        if (question.isEmpty()) return
-        if (key.isEmpty()) {
-            _chat.value = _chat.value + ChatMessage(false, "Per usarmi inserisci una chiave API di Anthropic nelle impostazioni.")
-            return
-        }
-        _chat.value = _chat.value + ChatMessage(true, question)
-        _assistantBusy.value = true
-        viewModelScope.launch {
-            try {
-                val reply = AssistantClient(key).ask(assistantContext(), _chat.value)
-                _chat.value = _chat.value + ChatMessage(false, reply.text.ifBlank { "Fatto." })
-                reply.actions.forEach { runHaAction(it) }
-                reply.openPackage?.let { pkg -> if (_apps.value.any { it.packageName == pkg }) launchPackage(pkg) }
-                _assistantTitles.value = resolveTitles(reply.titles)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: AssistantException) {
-                val msg = if (e.code == 401) "La chiave API non è valida." else "Errore dell'assistente: ${e.message}"
-                _chat.value = _chat.value + ChatMessage(false, msg)
-            } catch (e: Exception) {
-                _chat.value = _chat.value + ChatMessage(false, "Non riesco a raggiungere l'assistente — " + describe(e))
-            } finally {
-                _assistantBusy.value = false
-            }
-        }
-    }
-
-    private fun assistantContext(): String = buildString {
-        val now = LocalDateTime.now()
-        appendLine("Contesto attuale:")
-        appendLine("- Data e ora: ${now.format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.ITALIAN))}")
-        _weather.value?.let { appendLine("- Meteo a ${it.city}: ${it.temperature}°, ${it.description}") }
-        appendLine("- Profilo: ${prefs.profile.value.name}" + if (prefs.profile.value.kids) " (bambini: solo contenuti adatti)" else "")
-        val streaming = _providerRows.value.map { it.app.label }
-        if (streaming.isNotEmpty()) appendLine("- Servizi di streaming installati: ${streaming.joinToString()}")
-        appendLine("- App installate (nome = pacchetto): " +
-            _apps.value.take(120).joinToString("; ") { "${it.label} = ${it.packageName}" })
-        val list = prefs.myList.value.take(15)
-        if (list.isNotEmpty()) appendLine("- La mia lista: " + list.joinToString { "${it.title} (${it.year})" })
-        val recent = store.items.value.take(8)
-        if (recent.isNotEmpty()) appendLine("- Visti di recente: " + recent.joinToString { it.title })
-        MediaListenerService.nowPlaying.value?.let { appendLine("- In riproduzione: ${it.title} (${it.packageName})") }
-        val home = haTiles.value + speakers.value
-        if (home.isNotEmpty()) {
-            appendLine("- Entità di casa controllabili: " +
-                home.distinctBy { it.id }.joinToString("; ") { "${it.name} = ${it.id} (${it.stateLabel})" })
-        }
-    }
-
-    private suspend fun runHaAction(action: HaAction) {
-        val s = prefs.settings.value
-        if (!s.haConfigured) return
-        if (_haAll.value.none { it.id == action.entityId }) return
-        val domain = action.entityId.substringBefore('.')
-        val service = action.service.takeIf { it in setOf("turn_on", "turn_off", "toggle") } ?: "toggle"
-        val client = HaClient(s.haUrl, s.haToken)
-        try {
-            client.callService(domain, service, JSONObject().put("entity_id", action.entityId))
-            refreshHa(client)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            toast("Home Assistant: comando non riuscito")
-        }
-    }
-
-    private suspend fun resolveTitles(hints: List<TitleHint>): List<TmdbTitle> {
-        val key = prefs.settings.value.tmdbKey.trim()
-        if (key.isEmpty() || hints.isEmpty()) return emptyList()
-        val client = TmdbClient(key)
-        return coroutineScope {
-            hints.take(8).map { hint ->
-                async {
-                    val results = safe { client.search(hint.title) }
-                    results.firstOrNull { (hint.type == null || it.type == hint.type) && (hint.year.isBlank() || it.year == hint.year) }
-                        ?: results.firstOrNull { hint.type == null || it.type == hint.type }
-                }
-            }.awaitAll()
-        }.filterNotNull().filter { it.posterUrl != null }.distinctBy { it.key }
     }
 
     // ---- Statistiche ----

@@ -62,68 +62,10 @@ import it.peppedess.salotto.data.ChannelGuide
 import it.peppedess.salotto.data.HaEntity
 import it.peppedess.salotto.data.Playlist
 import it.peppedess.salotto.data.Profile
-import it.peppedess.salotto.service.NowPlaying
 import it.peppedess.salotto.ui.components.MenuEntry
 import it.peppedess.salotto.ui.components.TvCard
 import it.peppedess.salotto.ui.components.TvIconButton
 import kotlinx.coroutines.delay
-
-/** Barra in basso con quello che sta suonando in qualsiasi app. */
-@Composable
-internal fun NowPlayingBar(
-    nowPlaying: NowPlaying,
-    app: AppEntry?,
-    onCommand: (MediaCommand) -> Unit,
-    onOpen: () -> Unit,
-    onAudio: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color(0xF01A1F28))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TvCard(onClick = onOpen, modifier = Modifier.size(48.dp), shape = RoundedCornerShape(12.dp), focusScale = 1.1f) {
-            val art = nowPlaying.art
-            when {
-                art != null -> Image(art.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                app != null -> Image(app.icon, null, Modifier.fillMaxSize().padding(6.dp))
-                else -> Box(Modifier.fillMaxSize().background(Color.DarkGray))
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.width(220.dp)) {
-            Text(
-                nowPlaying.title,
-                style = MaterialTheme.typography.titleSmall,
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                listOfNotNull(app?.label, nowPlaying.subtitle.takeIf { it.isNotBlank() }).joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.7f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        TvIconButton(Icons.Rounded.SkipPrevious, "Precedente", onClick = { onCommand(MediaCommand.Previous) })
-        Spacer(Modifier.width(6.dp))
-        TvIconButton(
-            if (nowPlaying.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-            if (nowPlaying.playing) "Pausa" else "Riproduci",
-            onClick = { onCommand(MediaCommand.PlayPause) },
-        )
-        Spacer(Modifier.width(6.dp))
-        TvIconButton(Icons.Rounded.SkipNext, "Successivo", onClick = { onCommand(MediaCommand.Next) })
-        Spacer(Modifier.width(6.dp))
-        TvIconButton(Icons.Rounded.Tune, "Audio", onClick = onAudio)
-    }
-}
 
 /** Volume, uscita audio e casse di casa. */
 @Composable

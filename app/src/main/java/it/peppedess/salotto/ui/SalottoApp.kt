@@ -52,7 +52,7 @@ import it.peppedess.salotto.ui.components.PinDialog
 import it.peppedess.salotto.ui.components.TvPill
 import it.peppedess.salotto.ui.theme.Bg
 
-enum class Screen { Home, Search, Settings, Detail, HaEntities, Speakers, Assistant, Stats, Profiles }
+enum class Screen { Home, Search, Settings, Detail, HaEntities, Speakers, Stats, Profiles }
 
 /** Azione che richiede il PIN prima di essere eseguita. */
 private sealed interface PinAction {
@@ -134,7 +134,6 @@ fun SalottoApp(vm: HomeViewModel) {
                     detailReturn = Screen.Home
                     screen = Screen.Detail
                 },
-                onAssistant = { screen = Screen.Assistant },
                 onStats = { screen = Screen.Stats },
                 onProfiles = { showProfiles = true },
             )
@@ -174,17 +173,6 @@ fun SalottoApp(vm: HomeViewModel) {
                 vm = vm,
                 onClose = { screen = Screen.Settings },
                 speakersMode = true,
-            )
-
-            Screen.Assistant -> AssistantScreen(
-                vm = vm,
-                startWithVoice = false,
-                onClose = { screen = Screen.Home },
-                onOpenTitle = { title ->
-                    vm.openDetail(title, null)
-                    detailReturn = Screen.Assistant
-                    screen = Screen.Detail
-                },
             )
 
             Screen.Stats -> StatsScreen(

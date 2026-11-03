@@ -58,7 +58,6 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Download
@@ -104,7 +103,6 @@ fun SettingsScreen(
     val updateStatus by vm.updateStatus.collectAsStateWithLifecycle()
     val profiles by vm.profiles.collectAsStateWithLifecycle()
     var deezerDialog by remember { mutableStateOf(false) }
-    var anthropicDialog by remember { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val catalogStatus by vm.catalogStatus.collectAsStateWithLifecycle()
 
@@ -389,20 +387,6 @@ fun SettingsScreen(
                 )
             }
 
-            item { SectionTitle("Assistente") }
-            item {
-                SettingRow(
-                    icon = Icons.Rounded.AutoAwesome,
-                    title = "Chiave API di Anthropic",
-                    subtitle = if (settings.anthropicKey.isBlank()) {
-                        "Serve per l'assistente: la crei su console.anthropic.com"
-                    } else {
-                        "Impostata · modello ${it.peppedess.salotto.data.AssistantClient.MODEL}"
-                    },
-                    onClick = { anthropicDialog = true },
-                )
-            }
-
             item { SectionTitle("Timer e statistiche") }
             item {
                 SettingRow(
@@ -570,20 +554,6 @@ fun SettingsScreen(
                 deezerDialog = false
             },
             onDismiss = { deezerDialog = false },
-        )
-    }
-
-    if (anthropicDialog) {
-        TextInputDialog(
-            title = "Chiave API di Anthropic",
-            label = "Chiave (sk-ant-…)",
-            initial = settings.anthropicKey,
-            help = "Le domande all'assistente usano questa chiave e il suo credito.",
-            onConfirm = { key ->
-                vm.updateSettings { s -> s.copy(anthropicKey = key) }
-                anthropicDialog = false
-            },
-            onDismiss = { anthropicDialog = false },
         )
     }
 
