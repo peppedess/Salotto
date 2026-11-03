@@ -64,6 +64,8 @@ import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.ContinueItem
+import it.peppedess.salotto.data.HaEntity
+import androidx.compose.animation.animateColorAsState
 import it.peppedess.salotto.data.TmdbTitle
 import kotlinx.coroutines.delay
 
@@ -336,6 +338,70 @@ fun PosterCard(
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
+        }
+    }
+}
+
+/** Riquadro di un'entità di Home Assistant: luce, interruttore, scena… */
+@Composable
+fun HaTile(
+    entity: HaEntity,
+    onClick: () -> Unit,
+    onFocus: (Color) -> Unit,
+) {
+    val active = entity.isOn || entity.isAction
+    val accent = if (entity.domain == "light") Color(0xFFFFC960) else MaterialTheme.colorScheme.primary
+    val bg by animateColorAsState(
+        when {
+            entity.unavailable -> Color.White.copy(alpha = 0.05f)
+            entity.isOn -> accent.copy(alpha = 0.32f)
+            else -> Color.White.copy(alpha = 0.09f)
+        },
+        label = "haBg",
+    )
+    TvCard(
+        onClick = onClick,
+        modifier = Modifier.width(170.dp).height(88.dp),
+        shape = RoundedCornerShape(20.dp),
+        onFocus = { onFocus(if (entity.isOn) accent.darken(0.4f) else Color(0xFF2B3445)) },
+    ) { focused ->
+        Row(
+            Modifier
+                .fillMaxSize()
+                .background(if (focused) Color.White.copy(alpha = 0.20f) else bg)
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (entity.isOn) accent else Color.White.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    entity.icon(),
+                    null,
+                    tint = if (entity.isOn) Color.Black else Color.White,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = entity.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = entity.stateLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = if (active) 0.85f else 0.55f),
+                    maxLines = 1,
+                )
+            }
         }
     }
 }

@@ -1,9 +1,17 @@
 package it.peppedess.salotto.ui
 
+import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,7 +23,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,10 +31,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -35,6 +44,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Movie
@@ -50,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +71,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
@@ -67,6 +79,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,15 +90,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.ContinueItem
+import it.peppedess.salotto.data.HaEntity
 import it.peppedess.salotto.data.TmdbTitle
+import it.peppedess.salotto.data.Weather
 import it.peppedess.salotto.ui.components.AppCard
 import it.peppedess.salotto.ui.components.Clock
 import it.peppedess.salotto.ui.components.ContinueCard
+import it.peppedess.salotto.ui.components.HaTile
 import it.peppedess.salotto.ui.components.PosterCard
 import it.peppedess.salotto.ui.components.ShelfRow
 import it.peppedess.salotto.ui.components.TvCard
 import it.peppedess.salotto.ui.components.TvIconButton
 import it.peppedess.salotto.ui.components.TvPill
+import it.peppedess.salotto.ui.components.WeatherChip
 import it.peppedess.salotto.ui.components.darken
 import it.peppedess.salotto.ui.theme.Bg
 import kotlinx.coroutines.delay
@@ -97,20 +114,24 @@ internal val DefaultAmbient = Color(0xFF243044)
 private sealed interface HeroSlide {
     val key: String
     val color: Color
+    val art: Any?
 
     data class Media(val item: ContinueItem, val app: AppEntry?) : HeroSlide {
         override val key: String get() = "m:" + item.id
         override val color: Color get() = app?.color ?: DefaultAmbient
+        override val art: Any? get() = item.artModel
     }
 
     data class Featured(val title: TmdbTitle, val app: AppEntry) : HeroSlide {
         override val key: String get() = "t:" + title.key
         override val color: Color get() = app.color
+        override val art: Any? get() = title.backdropUrl ?: title.posterUrl
     }
 
     data class App(val app: AppEntry) : HeroSlide {
         override val key: String get() = "a:" + app.key
         override val color: Color get() = app.color
+        override val art: Any? get() = null
     }
 }
 
@@ -137,51 +158,90 @@ fun HomeScreen(
     val rows by vm.providerRows.collectAsStateWithLifecycle()
     val trending by vm.trending.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val haTiles by vm.haTiles.collectAsStateWithLifecycle()
+    val weather by vm.weather.collectAsStateWithLifecycle()
 
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var ambientTarget by remember { mutableStateOf(DefaultAmbient) }
     val ambient by animateColorAsState(ambientTarget, tween(700), label = "ambient")
+    var ambientArt by remember { mutableStateOf<Any?>(null) }
     var menuItem by remember { mutableStateOf<ContinueItem?>(null) }
+    val listState = rememberLazyListState()
+    val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
 
-    LaunchedEffect(homeTick) { tab = 0 }
+    LaunchedEffect(homeTick) {
+        tab = 0
+        listState.scrollToItem(0)
+    }
 
     val byPkg = remember(apps) { apps.associateBy { it.packageName } }
     val setAmbient: (Color) -> Unit = { ambientTarget = it }
+    val setArt: (Any?) -> Unit = { if (it != null) ambientArt = it }
 
     Box(
         Modifier
             .fillMaxSize()
             .background(Bg)
-            .drawBehind {
-                drawRect(
-                    Brush.radialGradient(
-                        colors = listOf(ambient.copy(alpha = 0.6f), Color.Transparent),
-                        center = Offset(size.width * 0.78f, 0f),
-                        radius = size.maxDimension * 0.8f,
-                    )
+    ) {
+        // Sfondo: immagine sfocata dell'elemento selezionato, più un alone di colore.
+        Crossfade(targetState = ambientArt, animationSpec = tween(900), label = "ambientArt") { art ->
+            if (art != null) {
+                AsyncImage(
+                    model = art,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .blur(48.dp)
+                        .graphicsLayer { alpha = if (Build.VERSION.SDK_INT >= 31) 0.38f else 0.14f },
                 )
             }
-    ) {
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    drawRect(
+                        Brush.radialGradient(
+                            colors = listOf(ambient.copy(alpha = 0.55f), Color.Transparent),
+                            center = Offset(size.width * 0.78f, 0f),
+                            radius = size.maxDimension * 0.8f,
+                        )
+                    )
+                    drawRect(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Bg.copy(alpha = 0.9f)))
+                }
+        )
+
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
-            TopBar(tab = tab, onTab = { tab = it }, onSearch = onSearch, onSettings = onSettings)
+            AnimatedVisibility(
+                visible = !scrolled || tab != 0,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                TopBar(tab = tab, weather = weather, onTab = { tab = it }, onSearch = onSearch, onSettings = onSettings)
+            }
             Crossfade(targetState = tab, label = "tab") { current ->
                 if (current == 0) {
                     ForYou(
+                        listState = listState,
                         apps = apps,
                         favorites = favorites,
                         media = media,
                         rows = rows,
                         trending = trending,
+                        haTiles = haTiles,
                         byPkg = byPkg,
                         access = access,
                         loading = loading,
                         showTmdbHint = settings.tmdbKey.isBlank(),
                         onAmbient = setAmbient,
+                        onArt = setArt,
                         onLaunch = vm::launch,
                         onResume = vm::resume,
                         onAppMenu = onAppMenu,
                         onMediaMenu = { menuItem = it },
                         onOpenTitle = onOpenTitle,
+                        onHaPress = vm::haPress,
                         onEnableAccess = { vm.openNotificationAccess() },
                         onTmdbHint = onSettings,
                     )
@@ -220,6 +280,7 @@ fun HomeScreen(
 @Composable
 private fun TopBar(
     tab: Int,
+    weather: Weather?,
     onTab: (Int) -> Unit,
     onSearch: (Boolean) -> Unit,
     onSettings: () -> Unit,
@@ -243,6 +304,7 @@ private fun TopBar(
         Spacer(Modifier.weight(1f))
         TvPill(text = "Cerca", icon = Icons.Rounded.Search, onClick = { onSearch(false) })
         TvIconButton(Icons.Rounded.Mic, "Ricerca vocale", onClick = { onSearch(true) })
+        WeatherChip(weather, Modifier.padding(start = 8.dp))
         Clock(Modifier.padding(horizontal = 8.dp))
         TvIconButton(Icons.Rounded.Settings, "Impostazioni", onClick = onSettings)
     }
@@ -250,31 +312,36 @@ private fun TopBar(
 
 @Composable
 private fun ForYou(
+    listState: LazyListState,
     apps: List<AppEntry>,
     favorites: List<AppEntry>,
     media: List<ContinueItem>,
     rows: List<ProviderRow>,
     trending: List<TmdbTitle>,
+    haTiles: List<HaEntity>,
     byPkg: Map<String, AppEntry>,
     access: Boolean,
     loading: Boolean,
     showTmdbHint: Boolean,
     onAmbient: (Color) -> Unit,
+    onArt: (Any?) -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onResume: (ContinueItem) -> Unit,
     onAppMenu: (AppEntry) -> Unit,
     onMediaMenu: (ContinueItem) -> Unit,
     onOpenTitle: (TmdbTitle, AppEntry?) -> Unit,
+    onHaPress: (HaEntity) -> Unit,
     onEnableAccess: () -> Unit,
     onTmdbHint: () -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val heroHeight = (maxHeight * 0.62f).coerceIn(170.dp, 440.dp)
+        val heroHeight = (maxHeight * 0.64f).coerceIn(180.dp, 460.dp)
         val slides = remember(media, rows, favorites, apps, byPkg) {
             buildSlides(media, rows, favorites, apps, byPkg)
         }
 
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 40.dp),
         ) {
@@ -283,7 +350,10 @@ private fun ForYou(
                     slides = slides,
                     height = heroHeight,
                     loading = loading,
-                    onAmbient = onAmbient,
+                    onAmbient = { slide ->
+                        onAmbient(slide.color)
+                        onArt(slide.art)
+                    },
                     onAction = { slide ->
                         when (slide) {
                             is HeroSlide.Media -> onResume(slide.item)
@@ -302,7 +372,10 @@ private fun ForYou(
                                 app = byPkg[entry.packageName],
                                 onClick = { onResume(entry) },
                                 onMenu = { onMediaMenu(entry) },
-                                onFocus = onAmbient,
+                                onFocus = { c ->
+                                    onAmbient(c)
+                                    onArt(entry.artModel)
+                                },
                             )
                         }
                     }
@@ -332,15 +405,31 @@ private fun ForYou(
                     }
                 }
             }
+            if (haTiles.isNotEmpty()) {
+                item(key = "home") {
+                    ShelfRow("Casa", 3) {
+                        items(haTiles, key = { it.id }) { entity ->
+                            HaTile(
+                                entity = entity,
+                                onClick = { onHaPress(entity) },
+                                onFocus = onAmbient,
+                            )
+                        }
+                    }
+                }
+            }
             rows.forEachIndexed { index, row ->
                 item(key = "row:" + row.app.packageName) {
-                    ShelfRow("Popolari su ${row.app.label}", 3 + index, icon = row.app.icon) {
+                    ShelfRow("Popolari su ${row.app.label}", 4 + index, icon = row.app.icon) {
                         items(row.titles, key = { it.key }) { t ->
                             PosterCard(
                                 title = t,
                                 tint = row.app.color,
                                 onClick = { onOpenTitle(t, row.app) },
-                                onFocus = onAmbient,
+                                onFocus = { c ->
+                                    onAmbient(c)
+                                    onArt(t.backdropUrl ?: t.posterUrl)
+                                },
                             )
                         }
                     }
@@ -348,13 +437,16 @@ private fun ForYou(
             }
             if (trending.isNotEmpty()) {
                 item(key = "trending") {
-                    ShelfRow("Di tendenza questa settimana", 3 + rows.size) {
+                    ShelfRow("Di tendenza questa settimana", 4 + rows.size) {
                         items(trending, key = { it.key }) { t ->
                             PosterCard(
                                 title = t,
                                 tint = DefaultAmbient,
                                 onClick = { onOpenTitle(t, null) },
-                                onFocus = onAmbient,
+                                onFocus = { c ->
+                                    onAmbient(c)
+                                    onArt(t.backdropUrl ?: t.posterUrl)
+                                },
                             )
                         }
                     }
@@ -372,7 +464,7 @@ private fun ForYou(
             }
             if (apps.isNotEmpty()) {
                 item(key = "apps") {
-                    ShelfRow("Le tue app", 4 + rows.size) {
+                    ShelfRow("Le tue app", 5 + rows.size) {
                         items(apps, key = { it.key }) { app ->
                             AppCard(
                                 app = app,
@@ -422,7 +514,7 @@ private fun Hero(
     slides: List<HeroSlide>,
     height: Dp,
     loading: Boolean,
-    onAmbient: (Color) -> Unit,
+    onAmbient: (HeroSlide) -> Unit,
     onAction: (HeroSlide) -> Unit,
 ) {
     val outer = Modifier
@@ -456,7 +548,7 @@ private fun Hero(
 
     LaunchedEffect(pager) {
         while (true) {
-            delay(8000)
+            delay(9000)
             val n = current.value.size
             if (!focusedInside && n > 1 && !pager.isScrollInProgress) {
                 pager.animateScrollToPage((pager.currentPage + 1) % n)
@@ -464,7 +556,7 @@ private fun Hero(
         }
     }
     LaunchedEffect(pager.currentPage, slides) {
-        slides.getOrNull(pager.currentPage)?.let { onAmbient(it.color) }
+        slides.getOrNull(pager.currentPage)?.let { onAmbient(it) }
     }
 
     TvCard(
@@ -472,7 +564,7 @@ private fun Hero(
         modifier = outer.onFocusChanged { focusedInside = it.hasFocus },
         shape = RoundedCornerShape(28.dp),
         focusScale = 1.015f,
-        onFocus = { current.value.getOrNull(pager.currentPage)?.let { onAmbient(it.color) } },
+        onFocus = { current.value.getOrNull(pager.currentPage)?.let(onAmbient) },
         onHorizontal = { dir ->
             val target = pager.currentPage + dir
             if (target in 0 until current.value.size) {
@@ -489,7 +581,7 @@ private fun Hero(
             key = { index -> current.value.getOrNull(index)?.key ?: index },
         ) { page ->
             val slide = current.value.getOrNull(page)
-            if (slide != null) HeroPage(slide, focused)
+            if (slide != null) HeroPage(slide, focused, isCurrent = page == pager.currentPage)
         }
         Dots(
             count = slides.size,
@@ -500,9 +592,9 @@ private fun Hero(
 }
 
 @Composable
-private fun HeroPage(slide: HeroSlide, focused: Boolean) {
+private fun HeroPage(slide: HeroSlide, focused: Boolean, isCurrent: Boolean) {
     val color = slide.color
-    val model: Any?
+    val model: Any? = slide.art
     val banner: ImageBitmap?
     val icon: ImageBitmap?
     val label: String
@@ -513,8 +605,7 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean) {
 
     when (slide) {
         is HeroSlide.Media -> {
-            model = slide.item.artModel
-            banner = slide.app?.banner
+            banner = if (model == null) slide.app?.banner else null
             icon = slide.app?.icon
             label = if (slide.item.playing) "In riproduzione" else "Continua a guardare"
             title = slide.item.title
@@ -523,7 +614,6 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean) {
             if (slide.item.durationMs > 0) progress = slide.item.progress
         }
         is HeroSlide.Featured -> {
-            model = slide.title.backdropUrl ?: slide.title.posterUrl
             banner = null
             icon = slide.app.icon
             label = "In evidenza su ${slide.app.label}"
@@ -532,8 +622,7 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean) {
             action = "Dettagli"
         }
         is HeroSlide.App -> {
-            model = null
-            banner = slide.app.banner
+            banner = null
             icon = slide.app.icon
             label = "In evidenza"
             title = slide.app.label
@@ -542,30 +631,57 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean) {
         }
     }
 
+    // Zoom lento sull'immagine della pagina visibile (effetto Ken Burns).
+    val zoom by animateFloatAsState(
+        targetValue = if (isCurrent) 1.1f else 1f,
+        animationSpec = if (isCurrent) tween(12_000, easing = LinearEasing) else tween(400),
+        label = "zoom",
+    )
+    val dark = color.darken(0.7f)
+
     Box(
         Modifier
             .fillMaxSize()
-            .background(Brush.linearGradient(listOf(color, Bg)))
+            .background(Brush.linearGradient(listOf(color.darken(0.2f), Bg)))
     ) {
-        val artModifier = Modifier.fillMaxHeight().fillMaxWidth(0.7f).align(Alignment.CenterEnd)
-        if (banner != null) {
-            Image(banner, null, artModifier, contentScale = ContentScale.Crop)
-        } else if (model == null && icon != null) {
-            Image(icon, null, Modifier.align(Alignment.CenterEnd).padding(end = 72.dp).size(120.dp))
+        val artModifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = zoom
+                scaleY = zoom
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.7f, 0.4f)
+            }
+        when {
+            model != null -> AsyncImage(
+                model = model,
+                contentDescription = null,
+                modifier = artModifier,
+                contentScale = ContentScale.Crop,
+            )
+            banner != null -> Image(banner, null, artModifier, contentScale = ContentScale.Crop)
+            icon != null -> Image(
+                icon,
+                null,
+                Modifier.align(Alignment.CenterEnd).padding(end = 80.dp).size(130.dp),
+            )
         }
-        if (model != null) {
-            AsyncImage(model = model, contentDescription = null, modifier = artModifier, contentScale = ContentScale.Crop)
-        }
+        // Sfumatura continua da sinistra (testo) verso l'immagine, senza bordi netti.
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to color.darken(0.6f),
-                        0.42f to color.darken(0.6f).copy(alpha = 0.85f),
-                        0.75f to Color.Transparent,
+                        0f to dark.copy(alpha = 0.97f),
+                        0.3f to dark.copy(alpha = 0.85f),
+                        0.55f to dark.copy(alpha = 0.35f),
+                        0.8f to Color.Transparent,
                     )
                 )
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.55f)))
         )
         Column(
             Modifier
@@ -593,7 +709,7 @@ private fun HeroPage(slide: HeroSlide, focused: Boolean) {
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.75f),
+                    color = Color.White.copy(alpha = 0.78f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

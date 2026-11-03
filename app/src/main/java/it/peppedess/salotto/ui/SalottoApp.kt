@@ -1,6 +1,7 @@
 package it.peppedess.salotto.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -35,7 +36,7 @@ import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.ui.components.MenuEntry
 import it.peppedess.salotto.ui.components.PinDialog
 
-enum class Screen { Home, Search, Settings, Detail }
+enum class Screen { Home, Search, Settings, Detail, HaEntities }
 
 @Composable
 fun SalottoApp(vm: HomeViewModel) {
@@ -50,8 +51,13 @@ fun SalottoApp(vm: HomeViewModel) {
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val homeTick by vm.homeTick.collectAsStateWithLifecycle()
 
+    val screensaver by vm.screensaver.collectAsStateWithLifecycle()
+
     LaunchedEffect(homeTick) {
         if (homeTick > 0) screen = Screen.Home
+    }
+    LaunchedEffect(screen) {
+        vm.setOnHome(screen == Screen.Home)
     }
 
     val openSettings: () -> Unit = {
@@ -101,13 +107,28 @@ fun SalottoApp(vm: HomeViewModel) {
             Screen.Settings -> SettingsScreen(
                 vm = vm,
                 onClose = { screen = Screen.Home },
+                onHaEntities = { screen = Screen.HaEntities },
             )
 
             Screen.Detail -> DetailScreen(
                 vm = vm,
                 onClose = { screen = detailReturn },
             )
+
+            Screen.HaEntities -> HaEntitiesScreen(
+                vm = vm,
+                onClose = { screen = Screen.Settings },
+            )
         }
+    }
+
+    // Salvaschermo sopra a tutto.
+    AnimatedVisibility(
+        visible = screensaver,
+        enter = fadeIn(tween(1200)),
+        exit = fadeOut(tween(400)),
+    ) {
+        AmbientScreen(vm)
     }
 
     if (pinPrompt) {

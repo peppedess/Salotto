@@ -12,7 +12,14 @@ data class Settings(
     val kiosk: Boolean = false,
     val pin: String = "",
     val tmdbKey: String = "",
-)
+    val screensaverMinutes: Int = 5,
+    val weatherCity: String = "Milano",
+    val haUrl: String = "",
+    val haToken: String = "",
+    val haEntities: List<String> = emptyList(),
+) {
+    val haConfigured: Boolean get() = haUrl.isNotBlank() && haToken.isNotBlank()
+}
 
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("salotto", Context.MODE_PRIVATE)
@@ -35,6 +42,11 @@ class Prefs(context: Context) {
             putBoolean(KEY_KIOSK, s.kiosk)
             putString(KEY_PIN, s.pin)
             putString(KEY_TMDB, s.tmdbKey)
+            putInt(KEY_SCREENSAVER, s.screensaverMinutes)
+            putString(KEY_CITY, s.weatherCity)
+            putString(KEY_HA_URL, s.haUrl)
+            putString(KEY_HA_TOKEN, s.haToken)
+            putString(KEY_HA_ENTITIES, s.haEntities.joinToString("\n"))
         }
         _settings.value = s
     }
@@ -68,10 +80,17 @@ class Prefs(context: Context) {
         kiosk = sp.getBoolean(KEY_KIOSK, false),
         pin = sp.getString(KEY_PIN, "").orEmpty(),
         tmdbKey = sp.getString(KEY_TMDB, "").orEmpty(),
+        screensaverMinutes = sp.getInt(KEY_SCREENSAVER, 5),
+        weatherCity = sp.getString(KEY_CITY, "Milano").orEmpty(),
+        haUrl = sp.getString(KEY_HA_URL, "").orEmpty(),
+        haToken = sp.getString(KEY_HA_TOKEN, "").orEmpty(),
+        haEntities = lines(KEY_HA_ENTITIES),
     )
 
-    private fun readFavorites(): List<String> =
-        sp.getString(KEY_FAVORITES, "").orEmpty().split("\n").filter { it.isNotBlank() }
+    private fun readFavorites(): List<String> = lines(KEY_FAVORITES)
+
+    private fun lines(key: String): List<String> =
+        sp.getString(key, "").orEmpty().split("\n").filter { it.isNotBlank() }
 
     private companion object {
         const val KEY_SCREEN_ON = "keep_screen_on"
@@ -79,6 +98,11 @@ class Prefs(context: Context) {
         const val KEY_KIOSK = "kiosk"
         const val KEY_PIN = "pin"
         const val KEY_TMDB = "tmdb_key"
+        const val KEY_SCREENSAVER = "screensaver_minutes"
+        const val KEY_CITY = "weather_city"
+        const val KEY_HA_URL = "ha_url"
+        const val KEY_HA_TOKEN = "ha_token"
+        const val KEY_HA_ENTITIES = "ha_entities"
         const val KEY_FAVORITES = "favorites"
         const val KEY_FAV_INIT = "favorites_init"
     }

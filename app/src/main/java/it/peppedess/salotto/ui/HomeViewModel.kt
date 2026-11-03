@@ -25,6 +25,11 @@ import it.peppedess.salotto.data.AppEntry
 import it.peppedess.salotto.data.AppRepository
 import it.peppedess.salotto.data.ContinueItem
 import it.peppedess.salotto.data.ContinueStore
+import it.peppedess.salotto.data.HaClient
+import it.peppedess.salotto.data.HaEntity
+import it.peppedess.salotto.data.HaException
+import it.peppedess.salotto.data.Weather
+import it.peppedess.salotto.data.WeatherClient
 import it.peppedess.salotto.data.Prefs
 import it.peppedess.salotto.data.Settings
 import it.peppedess.salotto.data.TmdbClient
@@ -111,6 +116,33 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private var lastCatalog = 0L
     private var reloadJob: Job? = null
 
+    // ---- Home Assistant ----
+    private val _haAll = MutableStateFlow<List<HaEntity>>(emptyList())
+    /** Tutte le entità controllabili, per la scelta nelle impostazioni. */
+    val haAll: StateFlow<List<HaEntity>> = _haAll.asStateFlow()
+
+    /** Le entità scelte, nell'ordine scelto, per la riga "Casa". */
+    val haTiles: StateFlow<List<HaEntity>> =
+        combine(_haAll, prefs.settings.map { it.haEntities }.distinctUntilChanged()) { all, ids ->
+            val map = all.associateBy { it.id }
+            ids.mapNotNull { map[it] }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val _haStatus = MutableStateFlow("")
+    val haStatus: StateFlow<String> = _haStatus.asStateFlow()
+    private val haTick = MutableStateFlow(0)
+
+    // ---- Meteo ----
+    private val _weather = MutableStateFlow<Weather?>(null)
+    val weather: StateFlow<Weather?> = _weather.asStateFlow()
+
+    // ---- Salvaschermo ----
+    private val foreground = MutableStateFlow(false)
+    private val onHome = MutableStateFlow(true)
+    private val lastActivity = MutableStateFlow(SystemClock.elapsedRealtime())
+    private val _screensaver = MutableStateFlow(false)
+    val screensaver: StateFlow<Boolean> = _screensaver.asStateFlow()
+
     private val packageCallback = object : LauncherApps.Callback() {
         override fun onPackageRemoved(packageName: String?, user: UserHandle?) = scheduleReload()
         override fun onPackageAdded(packageName: String?, user: UserHandle?) = scheduleReload()
@@ -132,6 +164,66 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 catalogTick,
             ) { key, _, _ -> key }
                 .collectLatest { key -> loadCatalog(key) }
+        }
+
+        // Home Assistant: aggiorna gli stati ogni 15 secondi mentre Salotto è in primo piano.
+        viewModelScope.launch {
+            combine(
+                prefs.settings.map { it.haUrl.trim() to it.haToken.trim() }.distinctUntilChanged(),
+                foreground,
+                haTick,
+            ) { config, fg, _ -> config to fg }
+                .collectLatest { (config, fg) ->
+                    val (url, token) = config
+                    if (url.isBlank() || token.isBlank()) {
+                        _haAll.value = emptyList()
+                        _haStatus.value = ""
+                        return@collectLatest
+                    }
+                    if (!fg) return@collectLatest
+                    val client = HaClient(url, token)
+                    while (true) {
+                        refreshHa(client)
+                        delay(HA_POLL_MS)
+                    }
+                }
+        }
+
+        // Meteo: all'avvio, quando cambia la città e ogni 30 minuti.
+        viewModelScope.launch {
+            prefs.settings.map { it.weatherCity.trim() }.distinctUntilChanged().collectLatest { city ->
+                if (city.isBlank()) {
+                    _weather.value = null
+                    return@collectLatest
+                }
+                while (true) {
+                    val result = try {
+                        WeatherClient.load(city)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (result != null) _weather.value = result
+                    delay(if (result != null) WEATHER_TTL_MS else 120_000L)
+                }
+            }
+        }
+
+        // Salvaschermo: parte dopo N minuti senza tocchi né tasti, solo sulla Home.
+        viewModelScope.launch {
+            combine(
+                lastActivity,
+                foreground,
+                onHome,
+                prefs.settings.map { it.screensaverMinutes }.distinctUntilChanged(),
+            ) { last, fg, home, minutes -> Triple(last, fg && home, minutes) }
+                .collectLatest { (last, eligible, minutes) ->
+                    if (!eligible || minutes <= 0) return@collectLatest
+                    val wait = minutes * 60_000L - (SystemClock.elapsedRealtime() - last)
+                    if (wait > 0) delay(wait)
+                    _screensaver.value = true
+                }
         }
 
         // Locandine TMDB per "Continua a guardare".
@@ -173,6 +265,84 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun goHome() {
         _homeTick.value = _homeTick.value + 1
+    }
+
+    // ---- Salvaschermo ----
+
+    fun setForeground(value: Boolean) {
+        foreground.value = value
+        if (!value) _screensaver.value = false
+        userActivity()
+    }
+
+    fun setOnHome(value: Boolean) {
+        onHome.value = value
+    }
+
+    /** Chiamato a ogni tocco o tasto. Restituisce true se ha chiuso il salvaschermo. */
+    fun userActivity(): Boolean {
+        lastActivity.value = SystemClock.elapsedRealtime()
+        if (_screensaver.value) {
+            _screensaver.value = false
+            return true
+        }
+        return false
+    }
+
+    fun startScreensaver() {
+        _screensaver.value = true
+    }
+
+    // ---- Home Assistant ----
+
+    private suspend fun refreshHa(client: HaClient) {
+        try {
+            _haAll.value = client.states()
+            _haStatus.value = "Connesso"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HaException) {
+            _haStatus.value = if (e.code == 401) "Token non valido" else "Errore Home Assistant (${e.code})"
+        } catch (e: Exception) {
+            _haStatus.value = "Home Assistant non raggiungibile — " + describe(e)
+        }
+    }
+
+    fun refreshHomeAssistant() {
+        haTick.value = haTick.value + 1
+    }
+
+    /** Tocco su un riquadro: aggiorna subito l'aspetto, poi chiede lo stato reale. */
+    fun haPress(entity: HaEntity) {
+        val s = prefs.settings.value
+        if (!s.haConfigured) return
+        if (!entity.isAction && entity.domain != "media_player") {
+            val flipped = if (entity.isOn) {
+                if (entity.domain == "cover") "closing" else "off"
+            } else {
+                if (entity.domain == "cover") "opening" else "on"
+            }
+            _haAll.value = _haAll.value.map { if (it.id == entity.id) it.copy(state = flipped) else it }
+        }
+        viewModelScope.launch {
+            val client = HaClient(s.haUrl, s.haToken)
+            try {
+                client.call(entity)
+                delay(700)
+                refreshHa(client)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                toast("Home Assistant: comando non riuscito")
+                refreshHa(client)
+            }
+        }
+    }
+
+    fun toggleHaEntity(id: String) {
+        prefs.updateSettings { s ->
+            s.copy(haEntities = if (id in s.haEntities) s.haEntities - id else s.haEntities + id)
+        }
     }
 
     // ---- Catalogo TMDB ----
@@ -452,6 +622,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val MAX_PROVIDER_ROWS = 6
         const val CATALOG_TTL_MS = 6L * 60 * 60 * 1000
+        const val HA_POLL_MS = 15_000L
+        const val WEATHER_TTL_MS = 30L * 60 * 1000
 
         val DEFAULT_FAVORITES = listOf(
             "com.google.android.youtube",

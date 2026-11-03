@@ -3,6 +3,8 @@ package it.peppedess.salotto
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -64,7 +66,44 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         vm.refreshStatus()
+        vm.setForeground(true)
         hideSystemBars()
+    }
+
+    override fun onPause() {
+        vm.setForeground(false)
+        super.onPause()
+    }
+
+    /** Il primo tocco sul salvaschermo lo chiude e non arriva all'interfaccia sotto. */
+    private var swallowGesture = false
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            swallowGesture = vm.userActivity()
+        }
+        if (swallowGesture) {
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) {
+                swallowGesture = false
+            }
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private var swallowKey = false
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            if (vm.userActivity()) {
+                swallowKey = true
+                return true
+            }
+        } else if (event.action == KeyEvent.ACTION_UP && swallowKey) {
+            swallowKey = false
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

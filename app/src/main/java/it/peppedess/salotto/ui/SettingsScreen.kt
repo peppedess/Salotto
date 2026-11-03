@@ -48,6 +48,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.Slideshow
+import androidx.compose.material.icons.rounded.Wallpaper
+import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.Refresh
 import it.peppedess.salotto.ui.components.PinDialog
@@ -57,7 +61,7 @@ import it.peppedess.salotto.ui.components.TvIconButton
 import it.peppedess.salotto.ui.theme.Bg
 
 @Composable
-fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit) {
+fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit, onHaEntities: () -> Unit) {
     BackHandler(onBack = onClose)
     val context = LocalContext.current
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -66,6 +70,11 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var pinDialog by remember { mutableStateOf(false) }
     var tmdbDialog by remember { mutableStateOf(false) }
+    var cityDialog by remember { mutableStateOf(false) }
+    var haUrlDialog by remember { mutableStateOf(false) }
+    var haTokenDialog by remember { mutableStateOf(false) }
+    val haStatus by vm.haStatus.collectAsStateWithLifecycle()
+    val weather by vm.weather.collectAsStateWithLifecycle()
     val catalogStatus by vm.catalogStatus.collectAsStateWithLifecycle()
 
     val version = remember {
@@ -128,6 +137,43 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit) {
                     subtitle = "Di base Salotto resta in orizzontale, come una TV",
                     checked = settings.allowPortrait,
                     onClick = { vm.updateSettings { s -> s.copy(allowPortrait = !s.allowPortrait) } },
+                )
+            }
+
+            item { SectionTitle("Salvaschermo") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Wallpaper,
+                    title = "Avvia il salvaschermo dopo",
+                    subtitle = when (settings.screensaverMinutes) {
+                        0 -> "Mai (tocca per cambiare)"
+                        1 -> "1 minuto senza usare Salotto (tocca per cambiare)"
+                        else -> "${settings.screensaverMinutes} minuti senza usare Salotto (tocca per cambiare)"
+                    },
+                    onClick = {
+                        val steps = listOf(0, 1, 2, 5, 10, 30)
+                        val next = steps[(steps.indexOf(settings.screensaverMinutes) + 1).mod(steps.size)]
+                        vm.updateSettings { s -> s.copy(screensaverMinutes = next) }
+                    },
+                )
+            }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.WbSunny,
+                    title = "Città per il meteo",
+                    subtitle = buildString {
+                        append(settings.weatherCity.ifBlank { "Nessuna" })
+                        weather?.let { append(" · ${it.temperature}° ${it.description}") }
+                    },
+                    onClick = { cityDialog = true },
+                )
+            }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Slideshow,
+                    title = "Prova il salvaschermo",
+                    subtitle = "Tocca lo schermo o premi un tasto per uscire",
+                    onClick = { vm.startScreensaver() },
                 )
             }
 
@@ -197,6 +243,42 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit) {
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(start = 4.dp),
                 )
+            }
+
+            item { SectionTitle("Home Assistant") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Lan,
+                    title = "Indirizzo di Home Assistant",
+                    subtitle = settings.haUrl.ifBlank { "Non impostato, ad esempio http://192.168.1.10:8123" },
+                    onClick = { haUrlDialog = true },
+                )
+            }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Key,
+                    title = "Token di accesso",
+                    subtitle = when {
+                        settings.haToken.isBlank() -> "Profilo HA → Sicurezza → Token di accesso a lunga durata"
+                        settings.haUrl.isBlank() -> "Impostato"
+                        else -> haStatus.ifBlank { "Impostato, connessione in corso…" }
+                    },
+                    onClick = { haTokenDialog = true },
+                )
+            }
+            if (settings.haConfigured) {
+                item {
+                    SettingRow(
+                        icon = Icons.Rounded.Home,
+                        title = "Scegli luci, scene e interruttori",
+                        subtitle = if (settings.haEntities.isEmpty()) {
+                            "Nessuna entità nella riga \"Casa\""
+                        } else {
+                            "${settings.haEntities.size} nella riga \"Casa\""
+                        },
+                        onClick = onHaEntities,
+                    )
+                }
             }
 
             item { SectionTitle("Kiosk") }
@@ -273,6 +355,49 @@ fun SettingsScreen(vm: HomeViewModel, onClose: () -> Unit) {
                 )
             }
         }
+    }
+
+    if (cityDialog) {
+        TextInputDialog(
+            title = "Città per il meteo",
+            label = "Città",
+            initial = settings.weatherCity,
+            help = "Ad esempio Milano o Sesto San Giovanni. Vuoto per nascondere il meteo.",
+            onConfirm = { city ->
+                vm.updateSettings { s -> s.copy(weatherCity = city) }
+                cityDialog = false
+            },
+            onDismiss = { cityDialog = false },
+        )
+    }
+
+    if (haUrlDialog) {
+        TextInputDialog(
+            title = "Indirizzo di Home Assistant",
+            label = "URL",
+            initial = settings.haUrl,
+            help = "Meglio l'IP locale, ad esempio http://192.168.1.10:8123",
+            onConfirm = { url ->
+                vm.updateSettings { s -> s.copy(haUrl = url) }
+                haUrlDialog = false
+            },
+            onDismiss = { haUrlDialog = false },
+        )
+    }
+
+    if (haTokenDialog) {
+        TextInputDialog(
+            title = "Token di Home Assistant",
+            label = "Token di accesso a lunga durata",
+            initial = settings.haToken,
+            help = "Lo crei nel tuo profilo di Home Assistant, scheda Sicurezza.",
+            onConfirm = { token ->
+                vm.updateSettings { s -> s.copy(haToken = token) }
+                haTokenDialog = false
+                message = if (token.isBlank()) "Token rimosso." else "Token salvato."
+            },
+            onDismiss = { haTokenDialog = false },
+        )
     }
 
     if (tmdbDialog) {

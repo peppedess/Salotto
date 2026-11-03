@@ -39,6 +39,7 @@
 
     <application
         android:name=".SalottoApplication"
+        android:usesCleartextTraffic="true"
         android:allowBackup="true"
         android:banner="@drawable/banner"
         android:icon="@mipmap/ic_launcher"
