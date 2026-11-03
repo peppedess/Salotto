@@ -71,6 +71,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import it.peppedess.salotto.data.CastMember
 import it.peppedess.salotto.data.TmdbTitle
+import it.peppedess.salotto.ui.components.LocalNarrow
 import it.peppedess.salotto.ui.components.PosterCard
 import it.peppedess.salotto.ui.components.TvIconButton
 import it.peppedess.salotto.ui.components.TvPill
@@ -102,6 +103,7 @@ fun DetailScreen(vm: HomeViewModel, onClose: () -> Unit, onOpenTitle: (TmdbTitle
     LaunchedEffect(title.key) { started = true }
     val zoom by animateFloatAsState(if (started) 1.08f else 1.0f, tween(14_000, easing = LinearEasing), label = "zoom")
 
+    val narrow = LocalNarrow.current
     Box(
         Modifier
             .fillMaxSize()
@@ -113,9 +115,9 @@ fun DetailScreen(vm: HomeViewModel, onClose: () -> Unit, onOpenTitle: (TmdbTitle
                 model = backdrop,
                 contentDescription = null,
                 modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(0.72f)
-                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight(if (narrow) 0.45f else 1f)
+                    .fillMaxWidth(if (narrow) 1f else 0.72f)
+                    .align(if (narrow) Alignment.TopCenter else Alignment.CenterEnd)
                     .graphicsLayer {
                         scaleX = zoom
                         scaleY = zoom
@@ -123,34 +125,43 @@ fun DetailScreen(vm: HomeViewModel, onClose: () -> Unit, onOpenTitle: (TmdbTitle
                 contentScale = ContentScale.Crop,
             )
         }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        0f to Bg,
-                        0.38f to Bg.copy(alpha = 0.94f),
-                        0.7f to tint.copy(alpha = 0.18f),
-                        1f to Color.Transparent,
+        if (narrow) {
+            // In verticale l'immagine sta in alto e il testo scorre sotto.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(0f to Bg.copy(alpha = 0.4f), 0.2f to Color.Transparent, 0.45f to Bg))
+            )
+        } else {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            0f to Bg,
+                            0.38f to Bg.copy(alpha = 0.94f),
+                            0.7f to tint.copy(alpha = 0.18f),
+                            1f to Color.Transparent,
+                        )
                     )
-                )
-        )
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Bg))
-        )
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Bg))
+            )
+        }
 
         Column(
             Modifier
                 .fillMaxHeight()
-                .fillMaxWidth(0.62f)
+                .fillMaxWidth(if (narrow) 1f else 0.62f)
                 .windowInsetsPadding(WindowInsets.displayCutout)
                 .verticalScroll(rememberScrollState())
                 .padding(start = 40.dp, end = 16.dp, top = 16.dp, bottom = 28.dp)
         ) {
             TvIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Indietro", onClick = onClose)
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(if (narrow) 140.dp else 16.dp))
 
             Row(verticalAlignment = Alignment.Top) {
                 if (title.posterUrl != null) {

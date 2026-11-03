@@ -21,6 +21,7 @@ import it.peppedess.salotto.data.Settings
 import it.peppedess.salotto.kiosk.Kiosk
 import it.peppedess.salotto.ui.HomeViewModel
 import it.peppedess.salotto.ui.NavSoundProvider
+import it.peppedess.salotto.ui.components.AdaptiveScale
 import it.peppedess.salotto.ui.SalottoApp
 import it.peppedess.salotto.ui.theme.SalottoTheme
 import kotlinx.coroutines.flow.combine
@@ -57,8 +58,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             SalottoTheme {
-                NavSoundProvider(vm) {
-                    SalottoApp(vm)
+                AdaptiveScale {
+                    NavSoundProvider(vm) {
+                        SalottoApp(vm)
+                    }
                 }
             }
         }

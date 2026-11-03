@@ -169,7 +169,8 @@ fun ShelfRow(
         }
     }
     val density = LocalDensity.current
-    val pivot = remember(density) { with(density) { pivotSpec(ROW_START.toPx()) } }
+    val start = rowStart
+    val pivot = remember(density, start) { with(density) { pivotSpec(start.toPx()) } }
     Column(
         modifier
             .fillMaxWidth()
@@ -179,7 +180,7 @@ fun ShelfRow(
             }
     ) {
         Row(
-            Modifier.padding(start = ROW_START, top = 10.dp, end = ROW_START),
+            Modifier.padding(start = start, top = 10.dp, end = start),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
@@ -195,7 +196,7 @@ fun ShelfRow(
         }
         CompositionLocalProvider(LocalBringIntoViewSpec provides pivot) {
             LazyRow(
-                contentPadding = PaddingValues(horizontal = ROW_START, vertical = 10.dp),
+                contentPadding = PaddingValues(horizontal = start, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 content = content,
             )
@@ -203,8 +204,6 @@ fun ShelfRow(
     }
 }
 
-/** Margine sinistro di righe e titoli, come il bordo sicuro di una TV. */
-val ROW_START = 40.dp
 
 @Composable
 fun AppCard(

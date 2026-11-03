@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -89,13 +90,15 @@ internal fun QuickPanel(
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss)
         )
     }
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
+        val panelWidth = minOf(330.dp, maxWidth * 0.88f)
         AnimatedVisibility(
             visible = visible,
             enter = slideInHorizontally(tween(280)) { it } + fadeIn(tween(200)),
             exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(180)),
         ) {
             PanelContent(
+                width = panelWidth,
                 vm = vm,
                 weather = weather,
                 profile = profile,
@@ -112,6 +115,7 @@ internal fun QuickPanel(
 
 @Composable
 private fun PanelContent(
+    width: androidx.compose.ui.unit.Dp,
     vm: HomeViewModel,
     weather: Weather?,
     profile: Profile,
@@ -138,7 +142,7 @@ private fun PanelContent(
 
     Column(
         Modifier
-            .width(330.dp)
+            .width(width)
             .fillMaxHeight()
             .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
             .background(Color(0xFF1A1E26))

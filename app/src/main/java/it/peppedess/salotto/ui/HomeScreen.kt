@@ -73,7 +73,11 @@ import it.peppedess.salotto.data.TmdbTitle
 import it.peppedess.salotto.data.Weather
 import it.peppedess.salotto.ui.components.AppCard
 import it.peppedess.salotto.ui.components.Clock
-import it.peppedess.salotto.ui.components.ROW_START
+import it.peppedess.salotto.ui.components.LocalNarrow
+import it.peppedess.salotto.ui.components.rowStart
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.unit.Dp
 import it.peppedess.salotto.ui.components.TvCard
 import it.peppedess.salotto.ui.components.TvIconButton
 import it.peppedess.salotto.ui.components.TvPill
@@ -83,7 +87,8 @@ import kotlinx.coroutines.delay
 import java.util.Locale
 
 internal val DefaultAmbient = Color(0xFF243044)
-private val TOP_BAR_HEIGHT = 64.dp
+private val BAR_WIDE = 64.dp
+private val BAR_NARROW = 108.dp
 
 private val TABS = listOf("Per te", "Film", "Serie TV", "Live", "App")
 private const val TAB_APPS = 4
@@ -128,6 +133,9 @@ fun HomeScreen(
     val adminActive by vm.adminActive.collectAsStateWithLifecycle()
     val update by vm.update.collectAsStateWithLifecycle()
     val kidsRemaining by vm.kidsRemaining.collectAsStateWithLifecycle()
+
+    val narrow = LocalNarrow.current
+    val barHeight = if (narrow && !profile.kids) BAR_NARROW else BAR_WIDE
 
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var collapsed by remember { mutableStateOf(false) }
@@ -281,7 +289,7 @@ fun HomeScreen(
     ) {
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
             if (profile.kids) {
-                KidsHome(profile = profile, apps = apps, firstFocus = firstFocus, onLaunch = vm::launch)
+                KidsHome(profile = profile, apps = apps, top = barHeight, firstFocus = firstFocus, onLaunch = vm::launch)
             } else {
                 Crossfade(targetState = tab, animationSpec = tween(260), label = "tab") { current ->
                     val content = when (current) {
@@ -292,13 +300,13 @@ fun HomeScreen(
                         else -> null
                     }
                     if (content == null) {
-                        AllApps(apps = listed, firstFocus = firstFocus, onLaunch = vm::launch, onAppMenu = onAppMenu)
+                        AllApps(apps = listed, top = barHeight, firstFocus = firstFocus, onLaunch = vm::launch, onAppMenu = onAppMenu)
                     } else {
                         BrowseScreen(
                             entries = content.first,
                             featured = content.second,
                             listState = listStates[current],
-                            topBarHeight = TOP_BAR_HEIGHT,
+                            topBarHeight = barHeight,
                             firstItemFocus = firstFocus,
                             onItem = onItem,
                             onItemMenu = onItemMenu,
@@ -315,7 +323,7 @@ fun HomeScreen(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(TOP_BAR_HEIGHT)
+                    .height(barHeight)
                     .graphicsLayer {
                         translationY = -size.height * shift
                         alpha = 1f - shift
@@ -324,6 +332,7 @@ fun HomeScreen(
                 contentAlignment = Alignment.CenterStart,
             ) {
                 TopBar(
+                    narrow = narrow,
                     tab = tab,
                     profile = profile,
                     weather = weather,
@@ -585,6 +594,7 @@ private fun buildLive(
 
 @Composable
 private fun TopBar(
+    narrow: Boolean,
     tab: Int,
     profile: Profile,
     weather: Weather?,
@@ -598,40 +608,24 @@ private fun TopBar(
     onProfiles: () -> Unit,
     onSleep: () -> Unit,
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = ROW_START - 4.dp, end = 28.dp, top = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        TvCard(onClick = onProfiles, modifier = Modifier.size(40.dp), shape = CircleShape, focusScale = 1.12f) {
-            ProfileAvatar(profile, 40)
-        }
-        Spacer(Modifier.width(6.dp))
-        if (profile.kids) {
-            Text(
-                text = "Ciao ${profile.name}!",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
+    val start = rowStart
+    val tabs: @Composable () -> Unit = {
+        TABS.forEachIndexed { index, label ->
+            TabLabel(
+                label = label,
+                selected = tab == index,
+                onClick = { onTab(index) },
+                modifier = if (index == 0) Modifier.focusRequester(firstTabFocus) else Modifier,
             )
-        } else {
-            TABS.forEachIndexed { index, label ->
-                TabLabel(
-                    label = label,
-                    selected = tab == index,
-                    onClick = { onTab(index) },
-                    modifier = if (index == 0) Modifier.focusRequester(firstTabFocus) else Modifier,
-                )
-            }
         }
-        Spacer(Modifier.weight(1f))
+    }
+    val actions: @Composable () -> Unit = {
         if (kidsRemaining != null) {
             Text(
                 text = "Tempo rimasto: ${kidsRemaining / 60} min",
                 style = MaterialTheme.typography.titleMedium,
                 color = if (kidsRemaining < 600) Color(0xFFFFB74D) else Color.White,
+                maxLines = 1,
             )
         }
         if (!profile.kids) {
@@ -641,11 +635,67 @@ private fun TopBar(
             TvIconButton(Icons.Rounded.Search, "Cerca", onClick = { onSearch(false) })
             TvIconButton(Icons.Rounded.Mic, "Ricerca vocale", onClick = { onSearch(true) })
         }
-        WeatherChip(weather, Modifier.padding(start = 6.dp))
+        if (!narrow) WeatherChip(weather, Modifier.padding(start = 6.dp))
         Clock(Modifier.padding(horizontal = 6.dp))
         if (!profile.kids) {
             TvIconButton(Icons.Rounded.Settings, "Pannello rapido", onClick = onPanel)
         }
+    }
+    val avatar: @Composable () -> Unit = {
+        TvCard(onClick = onProfiles, modifier = Modifier.size(40.dp), shape = CircleShape, focusScale = 1.12f) {
+            ProfileAvatar(profile, 40)
+        }
+    }
+
+    if (narrow && !profile.kids) {
+        // Schermo stretto: icone sopra, schede sotto in una riga che scorre.
+        Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = start - 4.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                avatar()
+                Spacer(Modifier.weight(1f))
+                actions()
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(start = start - 8.dp, end = 12.dp, top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                tabs()
+            }
+        }
+        return
+    }
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = start - 4.dp, end = 28.dp, top = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        avatar()
+        Spacer(Modifier.width(6.dp))
+        if (profile.kids) {
+            Text(
+                text = "Ciao ${profile.name}!",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+            )
+        } else {
+            tabs()
+        }
+        Spacer(Modifier.weight(1f))
+        actions()
     }
 }
 
@@ -690,13 +740,13 @@ private fun TabLabel(label: String, selected: Boolean, onClick: () -> Unit, modi
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun KidsHome(profile: Profile, apps: List<AppEntry>, firstFocus: FocusRequester, onLaunch: (AppEntry) -> Unit) {
+private fun KidsHome(profile: Profile, apps: List<AppEntry>, top: Dp, firstFocus: FocusRequester, onLaunch: (AppEntry) -> Unit) {
     val allowed = remember(profile, apps) {
         val byPkg = apps.associateBy { it.packageName }
         profile.allowedApps.mapNotNull { byPkg[it] }
     }
     if (allowed.isEmpty()) {
-        Box(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = TOP_BAR_HEIGHT + 40.dp, bottom = 40.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, top = top + 40.dp, bottom = 40.dp), contentAlignment = Alignment.Center) {
             Text(
                 "Nessuna app scelta per questo profilo. Chiedi a un adulto di sceglierle in Impostazioni → Profili.",
                 style = MaterialTheme.typography.titleMedium,
@@ -708,7 +758,7 @@ private fun KidsHome(profile: Profile, apps: List<AppEntry>, firstFocus: FocusRe
     LazyVerticalGrid(
         columns = GridCells.Adaptive(200.dp),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = TOP_BAR_HEIGHT + 20.dp, bottom = 40.dp),
+        contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = top + 20.dp, bottom = 40.dp),
         horizontalArrangement = Arrangement.spacedBy(22.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
@@ -723,6 +773,7 @@ private fun KidsHome(profile: Profile, apps: List<AppEntry>, firstFocus: FocusRe
 @Composable
 private fun AllApps(
     apps: List<AppEntry>,
+    top: Dp,
     firstFocus: FocusRequester,
     onLaunch: (AppEntry) -> Unit,
     onAppMenu: (AppEntry) -> Unit,
@@ -731,7 +782,7 @@ private fun AllApps(
         LazyVerticalGrid(
             columns = GridCells.Adaptive(170.dp),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = TOP_BAR_HEIGHT + 16.dp, bottom = 40.dp),
+            contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = top + 16.dp, bottom = 40.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {

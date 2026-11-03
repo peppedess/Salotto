@@ -90,7 +90,8 @@ import it.peppedess.salotto.ui.components.AppCard
 import it.peppedess.salotto.ui.components.ContinueCard
 import it.peppedess.salotto.ui.components.HaTile
 import it.peppedess.salotto.ui.components.PosterCard
-import it.peppedess.salotto.ui.components.ROW_START
+import it.peppedess.salotto.ui.components.LocalNarrow
+import it.peppedess.salotto.ui.components.rowStart
 import it.peppedess.salotto.ui.components.ShelfRow
 import it.peppedess.salotto.ui.components.TvCard
 import it.peppedess.salotto.ui.components.TvPill
@@ -378,16 +379,17 @@ fun BrowseScreen(
         }
     }
 
+    val narrow = LocalNarrow.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val full = (maxHeight * 0.56f).coerceIn(200.dp, 470.dp)
-        val compact = (maxHeight * 0.30f).coerceIn(110.dp, 280.dp)
+        val full = if (narrow) (maxHeight * 0.48f).coerceIn(260.dp, 520.dp) else (maxHeight * 0.56f).coerceIn(200.dp, 470.dp)
+        val compact = if (narrow) (maxHeight * 0.24f).coerceIn(130.dp, 260.dp) else (maxHeight * 0.30f).coerceIn(110.dp, 280.dp)
         val headerHeight by animateDpAsState(
             targetValue = if (collapsed) compact else full,
             animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
             label = "header",
         )
 
-        Backdrop(spotlight)
+        Backdrop(spotlight, narrow)
 
         Column(Modifier.fillMaxSize()) {
             Header(
@@ -446,7 +448,7 @@ fun BrowseScreen(
 }
 
 @Composable
-private fun Backdrop(spotlight: Spotlight?) {
+private fun Backdrop(spotlight: Spotlight?, narrow: Boolean) {
     val context = LocalContext.current
     Box(Modifier.fillMaxSize()) {
         val tint = spotlight?.tint ?: DefaultAmbient
@@ -470,8 +472,8 @@ private fun Backdrop(spotlight: Spotlight?) {
             label = "backdrop",
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .fillMaxWidth(0.74f)
-                .fillMaxHeight(0.82f),
+                .fillMaxWidth(if (narrow) 1f else 0.74f)
+                .fillMaxHeight(if (narrow) 0.5f else 0.82f),
         ) { (_, art) ->
             Box(Modifier.fillMaxSize()) {
                 when (art) {
@@ -485,16 +487,25 @@ private fun Backdrop(spotlight: Spotlight?) {
                     )
                 }
                 // Bordi sfumati: a sinistra verso il testo, in basso verso le righe.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Brush.horizontalGradient(0f to Bg, 0.35f to Bg.copy(alpha = 0.55f), 0.7f to Color.Transparent))
-                )
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to Bg))
-                )
+                if (narrow) {
+                    // In verticale il testo sta sotto l'immagine: sfuma solo verso il basso.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Brush.verticalGradient(0f to Bg.copy(alpha = 0.55f), 0.3f to Color.Transparent, 0.55f to Bg.copy(alpha = 0.6f), 1f to Bg))
+                    )
+                } else {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Brush.horizontalGradient(0f to Bg, 0.35f to Bg.copy(alpha = 0.55f), 0.7f to Color.Transparent))
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to Bg))
+                    )
+                }
             }
         }
     }
@@ -511,11 +522,13 @@ private fun Header(
     onAction: () -> Unit,
     onFocusChange: (Boolean) -> Unit,
 ) {
+    val narrow = LocalNarrow.current
+    val start = rowStart
     Box(
         Modifier
             .fillMaxWidth()
             .height(height)
-            .padding(start = ROW_START, end = ROW_START, top = topInset, bottom = 6.dp)
+            .padding(start = start, end = start, top = topInset, bottom = 6.dp)
             .onFocusChanged { onFocusChange(it.hasFocus) }
     ) {
         AnimatedContent(
@@ -524,7 +537,7 @@ private fun Header(
             contentKey = { it?.key },
             label = "spotlight",
             modifier = Modifier
-                .fillMaxWidth(0.56f)
+                .fillMaxWidth(if (narrow) 1f else 0.56f)
                 .fillMaxHeight(),
         ) { s ->
             if (s == null) return@AnimatedContent
@@ -684,7 +697,7 @@ private fun HintCard(hint: Hint) {
         onClick = hint.onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = ROW_START, vertical = 10.dp)
+            .padding(horizontal = rowStart, vertical = 10.dp)
             .height(68.dp),
         shape = RoundedCornerShape(20.dp),
         focusScale = 1.02f,
