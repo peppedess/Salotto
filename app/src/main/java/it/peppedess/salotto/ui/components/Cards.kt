@@ -366,6 +366,7 @@ fun PosterCard(
     onFocus: (Color) -> Unit,
     shareKey: String? = null,
     modifier: Modifier = Modifier,
+    badge: ImageBitmap? = null,
 ) {
     TvCard(
         onClick = onClick,
@@ -398,6 +399,18 @@ fun PosterCard(
                     .fillMaxSize()
                     .sharedPoster(shareKey),
                 contentScale = ContentScale.Crop,
+            )
+        }
+        if (badge != null) {
+            // "Disponibile su": l'icona del servizio dove guardarlo.
+            Image(
+                badge,
+                null,
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(6.dp)
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(6.dp)),
             )
         }
         if (title.rating >= 0.5) {

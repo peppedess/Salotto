@@ -48,6 +48,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.sp
+import it.peppedess.salotto.ui.components.POSTER_H
+import it.peppedess.salotto.ui.components.POSTER_W
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -114,6 +119,10 @@ sealed interface ShelfItem {
 
     data class Poster(val title: TmdbTitle, val tint: Color, val app: AppEntry?, val shareKey: String) : ShelfItem {
         override val key: String get() = "p:" + title.key
+    }
+
+    data class Top(val title: TmdbTitle, val rank: Int, val app: AppEntry?) : ShelfItem {
+        override val key: String get() = "top:" + title.key
     }
 
     data class Continue(val item: ContinueItem, val app: AppEntry?) : ShelfItem {
@@ -190,7 +199,15 @@ data class Spotlight(
     val progress: Float?,
     val action: String,
     val actionIcon: ImageVector,
+    val tmdb: TmdbTitle? = null,
+    val appIcon: ImageBitmap? = null,
 )
+
+/** Loghi dei titoli caricati da TMDB, condivisi da tutte le schermate. */
+@Immutable
+data class LogoAccess(val map: Map<String, String>, val request: (TmdbTitle) -> Unit)
+
+val LocalLogos = compositionLocalOf { LogoAccess(emptyMap()) {} }
 
 private fun remainingLabel(item: ContinueItem): String? {
     if (item.durationMs <= 0) return null
@@ -210,6 +227,22 @@ fun ShelfItem.spotlight(now: Long = System.currentTimeMillis()): Spotlight = whe
         progress = null,
         action = "Dettagli",
         actionIcon = Icons.Rounded.Info,
+        tmdb = title,
+        appIcon = app?.icon,
+    )
+    is ShelfItem.Top -> Spotlight(
+        key = key,
+        art = title.backdropUrl ?: title.posterUrl,
+        tint = app?.color ?: DefaultAmbient,
+        eyebrow = "N. $rank oggi" + (app?.let { " · su ${it.label}" } ?: ""),
+        title = title.title,
+        meta = title.metaLine(),
+        overview = title.overview,
+        progress = null,
+        action = "Dettagli",
+        actionIcon = Icons.Rounded.Info,
+        tmdb = title,
+        appIcon = app?.icon,
     )
     is ShelfItem.Continue -> Spotlight(
         key = key,
@@ -280,6 +313,7 @@ fun ShelfItem.spotlight(now: Long = System.currentTimeMillis()): Spotlight = whe
         progress = null,
         action = "Dettagli",
         actionIcon = Icons.Rounded.Info,
+        tmdb = episode.series,
     )
     is ShelfItem.Home -> Spotlight(
         key = key,
@@ -581,17 +615,38 @@ private fun Header(
                 .fillMaxHeight(),
         ) { s ->
             if (s == null) return@AnimatedContent
+            val logos = LocalLogos.current
+            val logo = s.tmdb?.let { logos.map[it.key] }
+            LaunchedEffect(s.key) { s.tmdb?.let(logos.request) }
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
-                Text(
-                    s.eyebrow.uppercase(),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White.copy(alpha = 0.75f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (s.appIcon != null) {
+                        Image(s.appIcon, null, Modifier.size(18.dp).clip(RoundedCornerShape(5.dp)))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(
+                        s.eyebrow.uppercase(),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.75f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                if (logo != null) {
+                    // Come Google TV: il logo del titolo al posto del nome scritto.
+                    AsyncImage(
+                        model = logo,
+                        contentDescription = s.title,
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.BottomStart,
+                        modifier = Modifier
+                            .height(if (compact) 40.dp else 76.dp)
+                            .fillMaxWidth(0.8f)
+                            .padding(bottom = 4.dp),
+                    )
+                } else Text(
                     s.title,
                     style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
@@ -666,7 +721,8 @@ fun ShelfCard(
     val focus: (Color) -> Unit = { onFocus() }
     Box(modifier) {
         when (item) {
-            is ShelfItem.Poster -> PosterCard(item.title, item.tint, onClick = onClick, onFocus = focus, shareKey = item.shareKey)
+            is ShelfItem.Poster -> PosterCard(item.title, item.tint, onClick = onClick, onFocus = focus, shareKey = item.shareKey, badge = item.app?.icon)
+            is ShelfItem.Top -> TopCard(item, onClick = onClick, onFocus = focus)
             is ShelfItem.Continue -> ContinueCard(item.item, item.app, onClick = onClick, onMenu = onMenu, onFocus = focus)
             is ShelfItem.App -> AppCard(item.app, onClick = onClick, onMenu = onMenu, onFocus = focus, modifier = Modifier.width(150.dp))
             is ShelfItem.Live -> LiveCard(item.guide, System.currentTimeMillis(), onClick = onClick, onMenu = onMenu, onFocus = focus)
@@ -674,6 +730,34 @@ fun ShelfCard(
             is ShelfItem.Episode -> EpisodeCard(item.episode, onClick = onClick, onFocus = focus)
             is ShelfItem.Home -> HaTile(item.entity, onClick = onClick, onFocus = focus)
             is ShelfItem.Tool -> ToolCard(item.icon, item.title, item.subtitle, item.color, onClick = onClick, onFocus = focus)
+        }
+    }
+}
+
+/** Locandina della Top 10 con il numero grande accanto, come su Google TV. */
+@Composable
+private fun TopCard(item: ShelfItem.Top, onClick: () -> Unit, onFocus: (Color) -> Unit) {
+    Box(Modifier.width(POSTER_W + 58.dp).height(POSTER_H)) {
+        Text(
+            text = item.rank.toString(),
+            fontSize = 120.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = 0.18f),
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .offset(x = if (item.rank >= 10) (-14).dp else 0.dp, y = 22.dp),
+        )
+        Box(Modifier.align(Alignment.CenterEnd)) {
+            PosterCard(
+                title = item.title,
+                tint = item.app?.color ?: DefaultAmbient,
+                onClick = onClick,
+                onFocus = onFocus,
+                shareKey = "top/${item.title.key}",
+                badge = item.app?.icon,
+            )
         }
     }
 }

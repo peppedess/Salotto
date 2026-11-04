@@ -93,7 +93,12 @@ fun SearchScreen(
     val apps by vm.apps.collectAsStateWithLifecycle()
     val media by vm.continueItems.collectAsStateWithLifecycle()
 
-    var query by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf(vm.consumePendingSearch() ?: "") }
+    // Testo inviato dal telecomando mentre la ricerca è già aperta.
+    val remoteQuery by vm.pendingSearch.collectAsStateWithLifecycle()
+    LaunchedEffect(remoteQuery) {
+        if (remoteQuery != null) vm.consumePendingSearch()?.let { query = it }
+    }
     var listening by remember { mutableStateOf(false) }
     var partial by remember { mutableStateOf("") }
     var level by remember { mutableFloatStateOf(0f) }
@@ -285,38 +290,23 @@ fun SearchScreen(
                         )
                     }
                 } else {
-                    item(key = "actions") {
-                        ShelfRow("Cerca \"$q\" su", 0) {
-                            items(actions, key = { it.label }) { action ->
-                                ActionCard(action) { action.run(q) }
-                            }
-                        }
-                    }
-                    if (titles.isNotEmpty()) {
-                        item(key = "titles") {
-                            ShelfRow("Film e serie", 1) {
-                                items(titles, key = { it.key }) { t ->
-                                    PosterCard(
-                                        title = t,
-                                        tint = DefaultAmbient,
-                                        onClick = { onOpenTitle(t) },
-                                        onFocus = {},
-                                    )
+                    // Come Google TV: risultati divisi per tipo, poi dove cercare ancora.
+                    val movies = titles.filter { it.type == "movie" }
+                    val shows = titles.filter { it.type == "tv" }
+                    if (movies.isNotEmpty()) {
+                        item(key = "movies") {
+                            ShelfRow("Film", 0) {
+                                items(movies, key = { it.key }) { t ->
+                                    PosterCard(title = t, tint = DefaultAmbient, onClick = { onOpenTitle(t) }, onFocus = {})
                                 }
                             }
                         }
                     }
-                    if (matchedMedia.isNotEmpty()) {
-                        item(key = "media") {
-                            ShelfRow("Continua a guardare", 1) {
-                                items(matchedMedia, key = { it.id }) { entry ->
-                                    ContinueCard(
-                                        item = entry,
-                                        app = byPkg[entry.packageName],
-                                        onClick = { vm.resume(entry) },
-                                        onMenu = { vm.resume(entry) },
-                                        onFocus = {},
-                                    )
+                    if (shows.isNotEmpty()) {
+                        item(key = "shows") {
+                            ShelfRow("Serie TV", 1) {
+                                items(shows, key = { it.key }) { t ->
+                                    PosterCard(title = t, tint = DefaultAmbient, onClick = { onOpenTitle(t) }, onFocus = {})
                                 }
                             }
                         }
@@ -332,6 +322,28 @@ fun SearchScreen(
                                         onFocus = {},
                                     )
                                 }
+                            }
+                        }
+                    }
+                    if (matchedMedia.isNotEmpty()) {
+                        item(key = "media") {
+                            ShelfRow("Continua a guardare", 3) {
+                                items(matchedMedia, key = { it.id }) { entry ->
+                                    ContinueCard(
+                                        item = entry,
+                                        app = byPkg[entry.packageName],
+                                        onClick = { vm.resume(entry) },
+                                        onMenu = { vm.resume(entry) },
+                                        onFocus = {},
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    item(key = "actions") {
+                        ShelfRow("Cerca \"$q\" anche su", 4) {
+                            items(actions, key = { it.label }) { action ->
+                                ActionCard(action) { action.run(q) }
                             }
                         }
                     }

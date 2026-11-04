@@ -58,6 +58,9 @@ import it.peppedess.salotto.data.WeatherClient
 import it.peppedess.salotto.data.Prefs
 import it.peppedess.salotto.data.Settings
 import it.peppedess.salotto.data.TmdbClient
+import it.peppedess.salotto.data.PhotoItem
+import it.peppedess.salotto.data.PhotosRepository
+import it.peppedess.salotto.remote.RemoteServer
 import it.peppedess.salotto.data.SystemTv
 import it.peppedess.salotto.ui.components.LaunchOrigin
 import it.peppedess.salotto.data.TmdbDetails
@@ -88,6 +91,9 @@ data class ProviderRow(
     val providerName: String,
     val titles: List<TmdbTitle>,
 )
+
+/** Titolo della Top 10 con l'app installata dove guardarlo, se c'è. */
+data class TopEntry(val title: TmdbTitle, val app: AppEntry?)
 
 /** Riga delle schede Film e Serie TV. */
 data class CatalogRow(
@@ -253,6 +259,21 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _statsPermission = MutableStateFlow(false)
     val statsPermission: StateFlow<Boolean> = _statsPermission.asStateFlow()
 
+    // ---- Loghi, Top 10, ricerca dal telecomando ----
+    private val _logos = MutableStateFlow<Map<String, String>>(emptyMap())
+    val logos: StateFlow<Map<String, String>> = _logos.asStateFlow()
+    private val logoRequested = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    private val _top10 = MutableStateFlow<List<TopEntry>>(emptyList())
+    val top10: StateFlow<List<TopEntry>> = _top10.asStateFlow()
+
+    private val _pendingSearch = MutableStateFlow<String?>(null)
+    /** Testo arrivato dal telecomando nel browser: apre la ricerca già compilata. */
+    val pendingSearch: StateFlow<String?> = _pendingSearch.asStateFlow()
+
+    private val _photos = MutableStateFlow<List<PhotoItem>>(emptyList())
+    val photos: StateFlow<List<PhotoItem>> = _photos.asStateFlow()
+
     // ---- Esperienza TV (dichiarati prima di init: init li usa subito) ----
     private val _canWriteSettings = MutableStateFlow(false)
     val canWriteSettings: StateFlow<Boolean> = _canWriteSettings.asStateFlow()
@@ -339,6 +360,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
         SleepTimer.load(app)
         DailyWorker.schedule(app)
+        if (prefs.settings.value.remoteEnabled) RemoteServer.start(app)
+        if (prefs.settings.value.screensaverSource != 0) loadPhotos()
 
         // Righe personali: nuovi episodi e consigli, da La mia lista e dai titoli aperti.
         viewModelScope.launch {
@@ -590,6 +613,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         browseLoaded.clear()
         browseRequested.toList().forEach { loadBrowse(it) }
         _trending.value = safe { client.trending() }.filter { it.posterUrl != null }
+        val today = safe { client.trendingToday() }.filter { it.posterUrl != null }.take(10)
+        _top10.value = coroutineScope {
+            today.map { t ->
+                async {
+                    val names = safe { client.watchProviders(t.type, t.id) }
+                    TopEntry(t, names.firstNotNullOfOrNull { matchApp(it, apps) })
+                }
+            }.awaitAll()
+        }
         _catalogStatus.value = if (rows.isEmpty()) {
             "Nessuna app di streaming riconosciuta"
         } else {
@@ -1071,6 +1103,54 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             SystemTv.restoreRotation(ctx)
         }
+    }
+
+    // ---- Loghi dei titoli ----
+
+    fun requestLogo(title: TmdbTitle) {
+        val key = prefs.settings.value.tmdbKey.trim()
+        if (key.isBlank() || !logoRequested.add(title.key)) return
+        viewModelScope.launch {
+            val url = try {
+                TmdbClient(key).logo(title)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logoRequested.remove(title.key)
+                null
+            }
+            if (url != null) _logos.value = _logos.value + (title.key to url)
+        }
+    }
+
+    // ---- Telecomando dal browser ----
+
+    fun remoteSearch(text: String) {
+        _pendingSearch.value = text
+    }
+
+    fun consumePendingSearch(): String? {
+        val q = _pendingSearch.value
+        _pendingSearch.value = null
+        return q
+    }
+
+    fun setRemoteEnabled(enabled: Boolean) {
+        prefs.updateSettings { it.copy(remoteEnabled = enabled) }
+        if (enabled) RemoteServer.start(ctx) else RemoteServer.stop()
+    }
+
+    // ---- Foto per il salvaschermo ----
+
+    fun loadPhotos() {
+        viewModelScope.launch {
+            _photos.value = PhotosRepository.recent(ctx)
+        }
+    }
+
+    fun setScreensaverSource(source: Int) {
+        prefs.updateSettings { it.copy(screensaverSource = source) }
+        if (source != 0) loadPhotos()
     }
 
     // ---- Servizio TV e configurazione iniziale ----

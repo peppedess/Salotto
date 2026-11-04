@@ -121,6 +121,7 @@ fun HomeScreen(
     val navKey by vm.navKey.collectAsStateWithLifecycle()
     val providerRows by vm.providerRows.collectAsStateWithLifecycle()
     val trending by vm.trending.collectAsStateWithLifecycle()
+    val top10 by vm.top10.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val haTiles by vm.haTiles.collectAsStateWithLifecycle()
     val weather by vm.weather.collectAsStateWithLifecycle()
@@ -149,6 +150,7 @@ fun HomeScreen(
     var showAudio by remember { mutableStateOf(false) }
     var showSleep by remember { mutableStateOf(false) }
     var showCastHelp by remember { mutableStateOf(false) }
+    var showRemote by remember { mutableStateOf(false) }
 
     val listStates = remember { List(TABS.size) { LazyListState() } }
     val firstFocus = remember { FocusRequester() }
@@ -190,7 +192,7 @@ fun HomeScreen(
     val tmdbMissing = settings.tmdbKey.isBlank()
 
     val forYou = remember(
-        listed, favorites, media, providerRows, trending, haTiles, myList, episodes,
+        listed, favorites, media, providerRows, trending, top10, haTiles, myList, episodes,
         recommendations, liveGuide, byPkg, access, tmdbMissing, update, sleepEndsAt, now,
     ) {
         buildForYou(
@@ -199,6 +201,7 @@ fun HomeScreen(
             media = media,
             providerRows = providerRows,
             trending = trending,
+            top10 = top10,
             haTiles = haTiles,
             myList = myList,
             episodes = episodes,
@@ -223,6 +226,9 @@ fun HomeScreen(
         when (item) {
             is ShelfItem.Poster -> {
                 onOpenTitle(item.title, item.app, item.shareKey)
+            }
+            is ShelfItem.Top -> {
+                onOpenTitle(item.title, item.app, "top/${item.title.key}")
             }
             is ShelfItem.Continue -> {
                 vm.resume(item.item)
@@ -373,6 +379,10 @@ fun HomeScreen(
                 showPanel = false
                 showSleep = true
             },
+            onRemote = {
+                showPanel = false
+                showRemote = true
+            },
         )
     }
 
@@ -411,6 +421,9 @@ fun HomeScreen(
     }
     if (showAudio) {
         AudioDialog(vm = vm, onDismiss = { showAudio = false })
+    }
+    if (showRemote) {
+        RemoteDialog(vm = vm, onDismiss = { showRemote = false })
     }
     if (showSleep) {
         SleepDialog(
@@ -454,6 +467,7 @@ private fun buildForYou(
     media: List<ContinueItem>,
     providerRows: List<ProviderRow>,
     trending: List<TmdbTitle>,
+    top10: List<TopEntry>,
     haTiles: List<HaEntity>,
     myList: List<TmdbTitle>,
     episodes: List<EpisodeInfo>,
@@ -484,6 +498,9 @@ private fun buildForYou(
         entries += Shelf("mylist", "La mia lista", myList.map { ShelfItem.Poster(it, DefaultAmbient, null, "mylist/${it.key}") })
     }
     if (live.isNotEmpty()) entries += Shelf("live", "In onda ora", live.map { ShelfItem.Live(it) })
+    if (top10.isNotEmpty()) {
+        entries += Shelf("top10", "Top 10 di oggi", top10.mapIndexed { i, e -> ShelfItem.Top(e.title, i + 1, e.app) })
+    }
     if (haTiles.isNotEmpty()) entries += Shelf("home", "Casa", haTiles.map { ShelfItem.Home(it) })
     providerRows.forEach { row ->
         entries += Shelf(

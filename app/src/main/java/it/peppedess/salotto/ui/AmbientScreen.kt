@@ -61,9 +61,18 @@ fun AmbientScreen(vm: HomeViewModel) {
     val trending by vm.trending.collectAsStateWithLifecycle()
     val media by vm.continueItems.collectAsStateWithLifecycle()
     val weather by vm.weather.collectAsStateWithLifecycle()
+    val photos by vm.photos.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val source = settings.screensaverSource
 
-    val slides = remember(rows, trending, media) {
+    val slides = remember(rows, trending, media, photos, source) {
+        val photoSlides = photos.map { p ->
+            val date = java.time.Instant.ofEpochMilli(p.takenAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+            AmbientSlide(p.uri, date.format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ITALIAN)))
+        }
+        if (source == 1 && photoSlides.isNotEmpty()) return@remember photoSlides.shuffled()
         val out = mutableListOf<AmbientSlide>()
+        if (source == 2) out += photoSlides.shuffled().take(20)
         media.take(3).forEach { item ->
             item.artModel?.let { out += AmbientSlide(it, "Continua a guardare · ${item.title}") }
         }

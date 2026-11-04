@@ -178,14 +178,29 @@ fun DetailScreen(vm: HomeViewModel, onClose: () -> Unit, onOpenTitle: (TmdbTitle
                     Spacer(Modifier.width(18.dp))
                 }
                 Column(Modifier.enterCascade(0)) {
-                    Text(
-                        text = title.title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    val logos = LocalLogos.current
+                    val logo = logos.map[title.key]
+                    LaunchedEffect(title.key) { logos.request(title) }
+                    if (logo != null) {
+                        AsyncImage(
+                            model = logo,
+                            contentDescription = title.title,
+                            contentScale = ContentScale.Fit,
+                            alignment = Alignment.CenterStart,
+                            modifier = Modifier
+                                .height(84.dp)
+                                .fillMaxWidth(),
+                        )
+                    } else {
+                        Text(
+                            text = title.title,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Spacer(Modifier.height(6.dp))
                     MetaChips(
                         listOfNotNull(

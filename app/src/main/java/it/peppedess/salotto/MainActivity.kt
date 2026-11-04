@@ -23,6 +23,8 @@ import it.peppedess.salotto.ui.HomeViewModel
 import it.peppedess.salotto.ui.NavSoundProvider
 import it.peppedess.salotto.ui.components.AdaptiveScale
 import it.peppedess.salotto.ui.components.LaunchOrigin
+import it.peppedess.salotto.remote.RemoteControl
+import java.lang.ref.WeakReference
 import it.peppedess.salotto.service.TvAccessibilityService
 import it.peppedess.salotto.ui.SalottoApp
 import it.peppedess.salotto.ui.theme.SalottoTheme
@@ -66,6 +68,8 @@ class MainActivity : ComponentActivity() {
         }
 
         LaunchOrigin.attach(window.decorView)
+        RemoteControl.activity = WeakReference(this)
+        intent?.getStringExtra(EXTRA_REMOTE_QUERY)?.let { vm.remoteSearch(it) }
 
         setContent {
             SalottoTheme {
@@ -80,7 +84,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        vm.goHome()
+        val query = intent.getStringExtra(EXTRA_REMOTE_QUERY)
+        if (query != null) vm.remoteSearch(query) else vm.goHome()
+    }
+
+    /** Tasto arrivato dal telecomando nel browser: entra come un tasto vero. */
+    fun injectKey(code: Int) {
+        val now = android.os.SystemClock.uptimeMillis()
+        dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0))
+        dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0))
+    }
+
+    fun remoteVolume(direction: Int) {
+        vm.changeVolume(direction)
+    }
+
+    fun remoteSearch(text: String) {
+        vm.remoteSearch(text)
     }
 
     override fun onRestart() {
@@ -91,12 +111,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        RemoteControl.resumed = true
         vm.refreshStatus()
         vm.setForeground(true)
         hideSystemBars()
     }
 
     override fun onPause() {
+        RemoteControl.resumed = false
         vm.setForeground(false)
         super.onPause()
     }
@@ -176,7 +198,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private companion object {
+    companion object {
+        const val EXTRA_REMOTE_QUERY = "it.peppedess.salotto.REMOTE_QUERY"
+
         val VOLUME_KEYS = setOf(KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE)
         val NAV_KEYS = setOf(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT,

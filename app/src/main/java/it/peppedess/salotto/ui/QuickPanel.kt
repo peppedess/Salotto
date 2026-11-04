@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SpeakerGroup
 import androidx.compose.material.icons.rounded.Wallpaper
+import androidx.compose.material.icons.rounded.SettingsRemote
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -79,6 +80,7 @@ internal fun QuickPanel(
     onSettings: () -> Unit,
     onProfiles: () -> Unit,
     onSleep: () -> Unit,
+    onRemote: () -> Unit,
 ) {
     BackHandler(enabled = visible, onBack = onDismiss)
 
@@ -107,6 +109,7 @@ internal fun QuickPanel(
                 onSettings = onSettings,
                 onProfiles = onProfiles,
                 onSleep = onSleep,
+                onRemote = onRemote,
                 onDismiss = onDismiss,
             )
         }
@@ -124,6 +127,7 @@ private fun PanelContent(
     onSettings: () -> Unit,
     onProfiles: () -> Unit,
     onSleep: () -> Unit,
+    onRemote: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val first = remember { FocusRequester() }
@@ -205,6 +209,7 @@ private fun PanelContent(
             onClick = onSleep,
         )
         MenuEntry(Icons.Rounded.AccountCircle, "Profilo: ${profile.name}", onClick = onProfiles)
+        MenuEntry(Icons.Rounded.SettingsRemote, "Telecomando dal telefono", onClick = onRemote)
         MenuEntry(Icons.Rounded.Wallpaper, "Salvaschermo") {
             onDismiss()
             vm.startScreensaver()

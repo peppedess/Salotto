@@ -91,6 +91,15 @@ fun SalottoApp(vm: HomeViewModel) {
         }
     }
     val appSettings by vm.settings.collectAsStateWithLifecycle()
+    val logos by vm.logos.collectAsStateWithLifecycle()
+    val logoAccess = remember(logos) { LogoAccess(logos, vm::requestLogo) }
+    // Schermata di avvio: solo all'accensione, non a ogni ritorno sulla home.
+    var intro by rememberSaveable { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(1300)
+        intro = false
+    }
+    CompositionLocalProvider(LocalLogos provides logoAccess) {
     Box(
         Modifier
             .fillMaxSize()
@@ -108,7 +117,11 @@ fun SalottoApp(vm: HomeViewModel) {
             SetupScreen(vm)
         }
     }
+    }
     VolumeHud(volume)
+    AnimatedVisibility(visible = intro, enter = fadeIn(tween(0)), exit = fadeOut(tween(500))) {
+        IntroScreen()
+    }
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -132,6 +145,14 @@ private fun SalottoContent(vm: HomeViewModel) {
 
     LaunchedEffect(homeTick) {
         if (homeTick > 0) screen = Screen.Home
+    }
+    // Ricerca inviata dal telecomando nel browser: apre la ricerca già compilata.
+    val pendingSearch by vm.pendingSearch.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingSearch) {
+        if (pendingSearch != null && screen != Screen.Search) {
+            searchWithVoice = false
+            screen = Screen.Search
+        }
     }
     LaunchedEffect(screen) {
         vm.setOnHome(screen == Screen.Home)
@@ -455,6 +476,52 @@ private fun VolumeHud(volume: Pair<Int, Int>?) {
                     modifier = Modifier.size(22.dp),
                 )
             }
+        }
+    }
+}
+
+/** Logo animato all'avvio, come l'accensione di una TV. */
+@Composable
+private fun IntroScreen() {
+    val logo = remember { androidx.compose.animation.core.Animatable(0f) }
+    val text = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) {
+        logo.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.55f, stiffness = 220f))
+    }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(250)
+        text.animateTo(1f, tween(500))
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Bg),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                androidx.compose.ui.res.painterResource(it.peppedess.salotto.R.drawable.ic_fg),
+                null,
+                tint = Color.White,
+                modifier = Modifier
+                    .size(120.dp)
+                    .graphicsLayer {
+                        val p = logo.value
+                        scaleX = 0.6f + 0.4f * p
+                        scaleY = 0.6f + 0.4f * p
+                        alpha = p.coerceIn(0f, 1f)
+                    },
+            )
+            Text(
+                "Salotto",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.graphicsLayer {
+                    alpha = text.value
+                    translationY = (1f - text.value) * 24f
+                },
+            )
         }
     }
 }

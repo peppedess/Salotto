@@ -28,6 +28,9 @@ data class Settings(
     val tvVolume: Boolean = true,
     val tvQuiet: Boolean = false,
     val setupDone: Boolean = false,
+    val remoteEnabled: Boolean = false,
+    /** 0 = titoli, 1 = le mie foto, 2 = entrambi. */
+    val screensaverSource: Int = 0,
     val liveTv: Boolean = true,
     val autoUpdate: Boolean = true,
     val episodeAlerts: Boolean = true,
@@ -117,6 +120,8 @@ class Prefs(context: Context) {
             putBoolean(KEY_TV_VOLUME, s.tvVolume)
             putBoolean(KEY_TV_QUIET, s.tvQuiet)
             putBoolean(KEY_SETUP_DONE, s.setupDone)
+            putBoolean(KEY_REMOTE, s.remoteEnabled)
+            putInt(KEY_SAVER_SOURCE, s.screensaverSource)
             putBoolean(KEY_LIVE_TV, s.liveTv)
             putBoolean(KEY_AUTO_UPDATE, s.autoUpdate)
             putBoolean(KEY_EPISODE_ALERTS, s.episodeAlerts)
@@ -248,6 +253,8 @@ class Prefs(context: Context) {
         tvVolume = sp.getBoolean(KEY_TV_VOLUME, true),
         tvQuiet = sp.getBoolean(KEY_TV_QUIET, false),
         setupDone = sp.getBoolean(KEY_SETUP_DONE, false),
+        remoteEnabled = sp.getBoolean(KEY_REMOTE, false),
+        screensaverSource = sp.getInt(KEY_SAVER_SOURCE, 0),
         liveTv = sp.getBoolean(KEY_LIVE_TV, true),
         autoUpdate = sp.getBoolean(KEY_AUTO_UPDATE, true),
         episodeAlerts = sp.getBoolean(KEY_EPISODE_ALERTS, true),
@@ -314,6 +321,8 @@ class Prefs(context: Context) {
         const val KEY_TV_VOLUME = "tv_volume"
         const val KEY_TV_QUIET = "tv_quiet"
         const val KEY_SETUP_DONE = "setup_done"
+        const val KEY_REMOTE = "remote_enabled"
+        const val KEY_SAVER_SOURCE = "screensaver_source"
         const val KEY_LIVE_TV = "live_tv"
         const val KEY_AUTO_UPDATE = "auto_update"
         const val KEY_EPISODE_ALERTS = "episode_alerts"

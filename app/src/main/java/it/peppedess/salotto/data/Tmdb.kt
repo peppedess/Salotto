@@ -199,6 +199,22 @@ class TmdbClient(credential: String) {
         )
     }
 
+    /** I titoli più visti di oggi (film e serie insieme). */
+    suspend fun trendingToday(): List<TmdbTitle> = parseList(get("/trending/all/day"), null)
+
+    /** Logo del titolo (PNG): prima in italiano, poi in inglese, poi senza testo. */
+    suspend fun logo(title: TmdbTitle): String? {
+        val json = get("/${title.type}/${title.id}/images", mapOf("include_image_language" to "it,en,null"))
+        val arr = json.optJSONArray("logos") ?: return null
+        val logos = (0 until arr.length()).map { arr.getJSONObject(it) }
+            .filter { str(it, "file_path").endsWith(".png") }
+        val pick = logos.firstOrNull { str(it, "iso_639_1") == "it" }
+            ?: logos.firstOrNull { str(it, "iso_639_1") == "en" }
+            ?: logos.firstOrNull()
+            ?: return null
+        return "https://image.tmdb.org/t/p/w500" + str(pick, "file_path")
+    }
+
     suspend fun trending(type: String): List<TmdbTitle> = parseList(get("/trending/$type/week"), type)
 
     /** Titoli di un genere, se possibile solo tra quelli disponibili sui servizi indicati. */

@@ -69,6 +69,9 @@ import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.ScreenLockLandscape
 import androidx.compose.material.icons.rounded.SettingsAccessibility
 import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.SettingsRemote
+import it.peppedess.salotto.data.PhotosRepository
 import androidx.compose.material.icons.rounded.DoNotDisturbOn
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.MusicNote
@@ -102,6 +105,11 @@ fun SettingsScreen(
     val haStatus by vm.haStatus.collectAsStateWithLifecycle()
     val weather by vm.weather.collectAsStateWithLifecycle()
     val canWriteSettings by vm.canWriteSettings.collectAsStateWithLifecycle()
+    var showRemote by remember { mutableStateOf(false) }
+    var pendingSaverSource by remember { mutableStateOf(0) }
+    val photoPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        vm.setScreensaverSource(if (granted) pendingSaverSource else 0)
+    }
     val tvService by vm.tvServiceEnabled.collectAsStateWithLifecycle()
     val epgStatus by vm.epgStatus.collectAsStateWithLifecycle()
     val adminActive by vm.adminActive.collectAsStateWithLifecycle()
@@ -195,6 +203,14 @@ fun SettingsScreen(
             }
 
             item { SectionTitle("Esperienza TV") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.SettingsRemote,
+                    title = "Telecomando dal telefono",
+                    subtitle = if (settings.remoteEnabled) "Attivo: tocca per vedere il QR code" else "Comanda Salotto dal browser di un altro telefono",
+                    onClick = { showRemote = true },
+                )
+            }
             item {
                 SettingRow(
                     icon = Icons.Rounded.Tv,
@@ -293,6 +309,26 @@ fun SettingsScreen(
                         weather?.let { append(" · ${it.temperature}° ${it.description}") }
                     },
                     onClick = { cityDialog = true },
+                )
+            }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.PhotoLibrary,
+                    title = "Cosa mostra il salvaschermo",
+                    subtitle = when (settings.screensaverSource) {
+                        1 -> "Le tue foto (tocca per cambiare)"
+                        2 -> "Titoli e le tue foto (tocca per cambiare)"
+                        else -> "Film e serie (tocca per cambiare)"
+                    },
+                    onClick = {
+                        val next = (settings.screensaverSource + 1) % 3
+                        if (next != 0 && !PhotosRepository.hasPermission(context)) {
+                            pendingSaverSource = next
+                            photoPermission.launch(PhotosRepository.permission)
+                        } else {
+                            vm.setScreensaverSource(next)
+                        }
+                    },
                 )
             }
             item {
@@ -576,6 +612,10 @@ fun SettingsScreen(
                 )
             }
         }
+    }
+
+    if (showRemote) {
+        RemoteDialog(vm = vm, onDismiss = { showRemote = false })
     }
 
     if (cityDialog) {

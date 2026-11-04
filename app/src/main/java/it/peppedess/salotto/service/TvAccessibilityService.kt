@@ -11,6 +11,8 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.media.AudioManager
+import android.os.Build
+import java.lang.ref.WeakReference
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -44,6 +46,7 @@ class TvAccessibilityService : AccessibilityService(), SharedPreferences.OnShare
         super.onServiceConnected()
         windowManager = getSystemService(WindowManager::class.java)
         prefs.registerOnSharedPreferenceChangeListener(this)
+        instance = WeakReference(this)
         enabled.value = true
         updateRotation()
     }
@@ -64,6 +67,7 @@ class TvAccessibilityService : AccessibilityService(), SharedPreferences.OnShare
 
     private fun cleanup() {
         enabled.value = false
+        instance = null
         runCatching { prefs.unregisterOnSharedPreferenceChangeListener(this) }
         handler.removeCallbacks(hideHud)
         hud?.let { runCatching { windowManager?.removeView(it) } }
@@ -87,17 +91,39 @@ class TvAccessibilityService : AccessibilityService(), SharedPreferences.OnShare
         val audio = getSystemService(AudioManager::class.java) ?: return false
         // Durante chiamate e suonerie decide il telefono.
         if (audio.mode != AudioManager.MODE_NORMAL) return false
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            val adjust = when {
-                direction > 0 -> AudioManager.ADJUST_RAISE
-                direction < 0 -> AudioManager.ADJUST_LOWER
-                else -> AudioManager.ADJUST_TOGGLE_MUTE
-            }
-            runCatching { audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, adjust, 0) }
-            val level = if (audio.isStreamMute(AudioManager.STREAM_MUSIC)) 0 else audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-            showHud(level, audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1))
-        }
+        if (event.action == KeyEvent.ACTION_DOWN) volumeStep(direction)
         return true
+    }
+
+    /** Cambia il volume dei contenuti e mostra la barra in stile TV. */
+    fun volumeStep(direction: Int) {
+        val audio = getSystemService(AudioManager::class.java) ?: return
+        val adjust = when {
+            direction > 0 -> AudioManager.ADJUST_RAISE
+            direction < 0 -> AudioManager.ADJUST_LOWER
+            else -> AudioManager.ADJUST_TOGGLE_MUTE
+        }
+        runCatching { audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, adjust, 0) }
+        val level = if (audio.isStreamMute(AudioManager.STREAM_MUSIC)) 0 else audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        showHud(level, audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1))
+    }
+
+    /**
+     * Comandi del telecomando dentro le altre app. Indietro e Home funzionano ovunque;
+     * le frecce e OK richiedono Android 13 o successivo.
+     */
+    fun remoteKey(key: String): Boolean {
+        val action = when (key) {
+            "back" -> GLOBAL_ACTION_BACK
+            "home" -> GLOBAL_ACTION_HOME
+            "up" -> if (Build.VERSION.SDK_INT >= 33) GLOBAL_ACTION_DPAD_UP else return false
+            "down" -> if (Build.VERSION.SDK_INT >= 33) GLOBAL_ACTION_DPAD_DOWN else return false
+            "left" -> if (Build.VERSION.SDK_INT >= 33) GLOBAL_ACTION_DPAD_LEFT else return false
+            "right" -> if (Build.VERSION.SDK_INT >= 33) GLOBAL_ACTION_DPAD_RIGHT else return false
+            "ok" -> if (Build.VERSION.SDK_INT >= 33) GLOBAL_ACTION_DPAD_CENTER else return false
+            else -> return false
+        }
+        return runCatching { performGlobalAction(action) }.getOrDefault(false)
     }
 
     private fun showHud(level: Int, max: Int) {
@@ -152,6 +178,9 @@ class TvAccessibilityService : AccessibilityService(), SharedPreferences.OnShare
     companion object {
         /** true mentre il servizio è attivo. */
         val enabled = MutableStateFlow(false)
+
+        @Volatile
+        var instance: WeakReference<TvAccessibilityService>? = null
     }
 }
 
