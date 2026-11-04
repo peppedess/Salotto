@@ -22,6 +22,7 @@ import it.peppedess.salotto.kiosk.Kiosk
 import it.peppedess.salotto.ui.HomeViewModel
 import it.peppedess.salotto.ui.NavSoundProvider
 import it.peppedess.salotto.ui.components.AdaptiveScale
+import it.peppedess.salotto.ui.components.LaunchOrigin
 import it.peppedess.salotto.ui.SalottoApp
 import it.peppedess.salotto.ui.theme.SalottoTheme
 import kotlinx.coroutines.flow.combine
@@ -56,6 +57,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        LaunchOrigin.attach(window.decorView)
+
         setContent {
             SalottoTheme {
                 AdaptiveScale {
@@ -70,6 +73,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         vm.goHome()
+    }
+
+    override fun onRestart() {
+        super.onRestart()
+        // Ritorno da un'altra app: la home riappare con una dissolvenza, come su Google TV.
+        vm.returnedHome()
     }
 
     override fun onResume() {
@@ -105,6 +114,20 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && event.keyCode in NAV_KEYS) {
             vm.navKeyPressed()
+        }
+        // Volume in stile TV: Salotto cambia il volume e mostra il suo indicatore al posto di quello di MIUI.
+        if (event.keyCode in VOLUME_KEYS && vm.settings.value.tvVolume) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                vm.userActivity()
+                vm.changeVolume(
+                    when (event.keyCode) {
+                        KeyEvent.KEYCODE_VOLUME_UP -> 1
+                        KeyEvent.KEYCODE_VOLUME_DOWN -> -1
+                        else -> 0
+                    }
+                )
+            }
+            return true
         }
         if (event.action == KeyEvent.ACTION_DOWN) {
             if (vm.userActivity()) {
@@ -146,6 +169,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
+        val VOLUME_KEYS = setOf(KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE)
         val NAV_KEYS = setOf(
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT,
             KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_TAB,

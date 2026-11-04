@@ -64,6 +64,11 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.ScreenLockLandscape
+import androidx.compose.material.icons.rounded.DoNotDisturbOn
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -94,6 +99,7 @@ fun SettingsScreen(
     var haTokenDialog by remember { mutableStateOf(false) }
     val haStatus by vm.haStatus.collectAsStateWithLifecycle()
     val weather by vm.weather.collectAsStateWithLifecycle()
+    val canWriteSettings by vm.canWriteSettings.collectAsStateWithLifecycle()
     val epgStatus by vm.epgStatus.collectAsStateWithLifecycle()
     val adminActive by vm.adminActive.collectAsStateWithLifecycle()
     val statsAllowed by vm.statsPermission.collectAsStateWithLifecycle()
@@ -182,6 +188,66 @@ fun SettingsScreen(
                     subtitle = "Nella riga \"Le tue app\" e nella scheda App: video, streaming, TV e giochi",
                     checked = settings.entertainmentOnly,
                     onClick = { vm.updateSettings { s -> s.copy(entertainmentOnly = !s.entertainmentOnly) } },
+                )
+            }
+
+            item { SectionTitle("Esperienza TV") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Tv,
+                    title = "Apri le versioni TV delle app",
+                    subtitle = if (vm.smartTubeInstalled()) {
+                        "Se un'app ha l'interfaccia per TV si apre quella · YouTube si apre in SmartTube"
+                    } else {
+                        "Se un'app ha l'interfaccia per TV si apre quella"
+                    },
+                    checked = settings.preferTvApps,
+                    onClick = { vm.updateSettings { s -> s.copy(preferTvApps = !s.preferTvApps) } },
+                )
+            }
+            if (!vm.smartTubeInstalled()) {
+                item {
+                    SettingRow(
+                        icon = Icons.Rounded.SmartDisplay,
+                        title = "Installa SmartTube",
+                        subtitle = "YouTube con l'interfaccia della TV, gratuito e senza pubblicità: Salotto lo userà al posto di YouTube",
+                        onClick = { vm.openUrl("https://smarttubeapp.github.io") },
+                    )
+                }
+            }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.ScreenLockLandscape,
+                    title = "Tutte le app in orizzontale",
+                    subtitle = when {
+                        !settings.landscapeAll -> "Blocca la rotazione del telefono in orizzontale, come una TV"
+                        canWriteSettings -> "Attivo: le app si aprono in orizzontale (tranne quelle che lo impediscono)"
+                        else -> "Serve il permesso \"Modifica impostazioni di sistema\": tocca per concederlo"
+                    },
+                    checked = settings.landscapeAll,
+                    onClick = { vm.setLandscapeAll(!settings.landscapeAll || !canWriteSettings) },
+                )
+            }
+            item {
+                SettingRow(
+                    icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                    title = "Volume in stile TV",
+                    subtitle = "Dentro Salotto i tasti del volume mostrano l'indicatore della TV al posto di quello del telefono",
+                    checked = settings.tvVolume,
+                    onClick = { vm.updateSettings { s -> s.copy(tvVolume = !s.tvVolume) } },
+                )
+            }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.DoNotDisturbOn,
+                    title = "Niente notifiche mentre guardi",
+                    subtitle = if (access) {
+                        "Attiva \"Non disturbare\" (solo priorità) quando usi Salotto"
+                    } else {
+                        "Serve l'accesso alle notifiche (lo stesso di \"Continua a guardare\")"
+                    },
+                    checked = settings.tvQuiet,
+                    onClick = { vm.setTvQuiet(!settings.tvQuiet) },
                 )
             }
 

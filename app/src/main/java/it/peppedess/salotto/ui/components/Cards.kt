@@ -64,6 +64,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
@@ -105,10 +108,19 @@ fun TvCard(
     )
     val borderAlpha by animateFloatAsState(if (focused) 1f else 0f, label = "border")
     val navSound = LocalNavSound.current
+    // Posizione della scheda, letta solo al tocco: serve all'animazione di apertura delle app.
+    val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val click: () -> Unit = {
+        placed[0]?.takeIf { it.isAttached }?.boundsInWindow()?.let { b ->
+            LaunchOrigin.set(android.graphics.Rect(b.left.toInt(), b.top.toInt(), b.right.toInt(), b.bottom.toInt()))
+        }
+        onClick()
+    }
 
     Box(
         modifier = modifier
             .zIndex(if (focused) 1f else 0f)
+            .onPlaced { placed[0] = it }
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -141,7 +153,7 @@ fun TvCard(
             .combinedClickable(
                 interactionSource = interaction,
                 indication = LocalIndication.current,
-                onClick = onClick,
+                onClick = click,
                 onLongClick = onMenu,
             ),
     ) {

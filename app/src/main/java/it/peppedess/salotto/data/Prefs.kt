@@ -23,6 +23,10 @@ data class Settings(
     val haEntities: List<String> = emptyList(),
     val entertainmentOnly: Boolean = true,
     val navSounds: Boolean = true,
+    val preferTvApps: Boolean = true,
+    val landscapeAll: Boolean = false,
+    val tvVolume: Boolean = true,
+    val tvQuiet: Boolean = false,
     val liveTv: Boolean = true,
     val autoUpdate: Boolean = true,
     val episodeAlerts: Boolean = true,
@@ -107,6 +111,10 @@ class Prefs(context: Context) {
             putString(KEY_HA_ENTITIES, s.haEntities.joinToString("\n"))
             putBoolean(KEY_ENTERTAINMENT, s.entertainmentOnly)
             putBoolean(KEY_NAV_SOUNDS, s.navSounds)
+            putBoolean(KEY_TV_APPS, s.preferTvApps)
+            putBoolean(KEY_LANDSCAPE_ALL, s.landscapeAll)
+            putBoolean(KEY_TV_VOLUME, s.tvVolume)
+            putBoolean(KEY_TV_QUIET, s.tvQuiet)
             putBoolean(KEY_LIVE_TV, s.liveTv)
             putBoolean(KEY_AUTO_UPDATE, s.autoUpdate)
             putBoolean(KEY_EPISODE_ALERTS, s.episodeAlerts)
@@ -233,6 +241,10 @@ class Prefs(context: Context) {
         haEntities = lines(KEY_HA_ENTITIES),
         entertainmentOnly = sp.getBoolean(KEY_ENTERTAINMENT, true),
         navSounds = sp.getBoolean(KEY_NAV_SOUNDS, true),
+        preferTvApps = sp.getBoolean(KEY_TV_APPS, true),
+        landscapeAll = sp.getBoolean(KEY_LANDSCAPE_ALL, false),
+        tvVolume = sp.getBoolean(KEY_TV_VOLUME, true),
+        tvQuiet = sp.getBoolean(KEY_TV_QUIET, false),
         liveTv = sp.getBoolean(KEY_LIVE_TV, true),
         autoUpdate = sp.getBoolean(KEY_AUTO_UPDATE, true),
         episodeAlerts = sp.getBoolean(KEY_EPISODE_ALERTS, true),
@@ -294,6 +306,10 @@ class Prefs(context: Context) {
         const val KEY_HA_ENTITIES = "ha_entities"
         const val KEY_ENTERTAINMENT = "entertainment_only"
         const val KEY_NAV_SOUNDS = "nav_sounds"
+        const val KEY_TV_APPS = "prefer_tv_apps"
+        const val KEY_LANDSCAPE_ALL = "landscape_all"
+        const val KEY_TV_VOLUME = "tv_volume"
+        const val KEY_TV_QUIET = "tv_quiet"
         const val KEY_LIVE_TV = "live_tv"
         const val KEY_AUTO_UPDATE = "auto_update"
         const val KEY_EPISODE_ALERTS = "episode_alerts"

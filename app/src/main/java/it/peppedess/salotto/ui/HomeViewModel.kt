@@ -57,6 +57,8 @@ import it.peppedess.salotto.data.WeatherClient
 import it.peppedess.salotto.data.Prefs
 import it.peppedess.salotto.data.Settings
 import it.peppedess.salotto.data.TmdbClient
+import it.peppedess.salotto.data.SystemTv
+import it.peppedess.salotto.ui.components.LaunchOrigin
 import it.peppedess.salotto.data.TmdbDetails
 import it.peppedess.salotto.data.TmdbException
 import it.peppedess.salotto.data.TmdbTitle
@@ -218,6 +220,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- La mia lista, nuovi episodi, consigli ----
     val myList: StateFlow<List<TmdbTitle>> = prefs.myList
+    val history: StateFlow<List<TmdbTitle>> = prefs.history
     private val _newEpisodes = MutableStateFlow<List<EpisodeInfo>>(emptyList())
     val newEpisodes: StateFlow<List<EpisodeInfo>> = _newEpisodes.asStateFlow()
     private val _recommendations = MutableStateFlow<List<Pair<TmdbTitle, List<TmdbTitle>>>>(emptyList())
@@ -428,6 +431,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         _adminActive.value = ctx.getSystemService(DevicePolicyManager::class.java)
             ?.isAdminActive(Kiosk.admin(ctx)) == true
         _statsPermission.value = StatsRepository.hasPermission(ctx)
+        applySystemTv()
         if (lastCatalog > 0 && SystemClock.elapsedRealtime() - lastCatalog > CATALOG_TTL_MS) {
             catalogTick.value = catalogTick.value + 1
         }
@@ -703,7 +707,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             .setPackage(app.packageName)
             .putExtra(SearchManager.QUERY, title.title)
         val canSearch = ctx.packageManager.queryIntentActivities(search, 0).isNotEmpty()
-        if (canSearch && start(search, quiet = true)) return
+        if (canSearch && start(search, quiet = true, animate = true)) return
 
         val clipboard = ctx.getSystemService(ClipboardManager::class.java)
         runCatching { clipboard?.setPrimaryClip(ClipData.newPlainText("Titolo", title.title)) }
@@ -813,7 +817,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Dirette TV ----
 
     fun openLive(channel: TvChannel) {
-        start(Intent(Intent.ACTION_VIEW, Uri.parse(channel.liveUrl)))
+        start(Intent(Intent.ACTION_VIEW, Uri.parse(channel.liveUrl)), animate = true)
     }
 
     fun reloadEpg() {
@@ -978,27 +982,110 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Avvio app e contenuti ----
 
     fun launch(app: AppEntry) {
+        tvIntentFor(app.packageName)?.let { tv ->
+            if (start(tv, quiet = true, animate = true)) return
+        }
         val component = ComponentName.unflattenFromString(app.key)
         val ok = component != null && runCatching {
-            launcherApps.startMainActivity(component, Process.myUserHandle(), null, null)
+            launcherApps.startMainActivity(
+                component,
+                Process.myUserHandle(),
+                LaunchOrigin.sourceBounds(),
+                LaunchOrigin.options()?.toBundle(),
+            )
         }.isSuccess
         if (!ok) launchPackage(app.packageName)
+    }
+
+    /**
+     * Versione per TV di un'app, se c'è: l'attività "leanback" dell'app stessa,
+     * oppure SmartTube al posto di YouTube.
+     */
+    private fun tvIntentFor(pkg: String): Intent? {
+        if (!prefs.settings.value.preferTvApps) return null
+        val pm = ctx.packageManager
+        if (pkg == YOUTUBE) {
+            SystemTv.SMARTTUBE.firstNotNullOfOrNull { tube ->
+                pm.getLeanbackLaunchIntentForPackage(tube) ?: pm.getLaunchIntentForPackage(tube)
+            }?.let { return it }
+        }
+        return pm.getLeanbackLaunchIntentForPackage(pkg)
+    }
+
+    fun smartTubeInstalled(): Boolean =
+        SystemTv.SMARTTUBE.any { runCatching { ctx.packageManager.getPackageInfo(it, 0) }.isSuccess }
+
+    // ---- Esperienza TV di sistema ----
+
+    private val _canWriteSettings = MutableStateFlow(false)
+    val canWriteSettings: StateFlow<Boolean> = _canWriteSettings.asStateFlow()
+
+    private val _volume = MutableStateFlow<Pair<Int, Int>?>(null)
+    /** Livello e massimo del volume da mostrare nell'indicatore in stile TV, null se nascosto. */
+    val volumeHud: StateFlow<Pair<Int, Int>?> = _volume.asStateFlow()
+    private var volumeJob: Job? = null
+
+    private val _returnTick = MutableStateFlow(0)
+    val returnTick: StateFlow<Int> = _returnTick.asStateFlow()
+
+    fun returnedHome() {
+        _returnTick.value = _returnTick.value + 1
+    }
+
+    /** Volume gestito da Salotto: niente pannello di MIUI, solo l'indicatore in stile TV. */
+    fun changeVolume(direction: Int) {
+        val a = ctx.getSystemService(AudioManager::class.java) ?: return
+        val adjust = when {
+            direction > 0 -> AudioManager.ADJUST_RAISE
+            direction < 0 -> AudioManager.ADJUST_LOWER
+            else -> AudioManager.ADJUST_TOGGLE_MUTE
+        }
+        runCatching { a.adjustStreamVolume(AudioManager.STREAM_MUSIC, adjust, 0) }
+        val level = if (a.isStreamMute(AudioManager.STREAM_MUSIC)) 0 else a.getStreamVolume(AudioManager.STREAM_MUSIC)
+        _volume.value = level to a.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        volumeJob?.cancel()
+        volumeJob = viewModelScope.launch {
+            delay(1800)
+            _volume.value = null
+        }
+    }
+
+    fun setLandscapeAll(enabled: Boolean) {
+        prefs.updateSettings { it.copy(landscapeAll = enabled) }
+        if (enabled) {
+            if (SystemTv.canWriteSettings(ctx)) {
+                SystemTv.lockLandscape(ctx)
+            } else {
+                start(Intent(AndroidSettings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+            }
+        } else {
+            SystemTv.restoreRotation(ctx)
+        }
+    }
+
+    fun setTvQuiet(enabled: Boolean) {
+        prefs.updateSettings { it.copy(tvQuiet = enabled) }
+        MediaListenerService.setQuiet(ctx, enabled)
+    }
+
+    private fun applySystemTv() {
+        _canWriteSettings.value = SystemTv.canWriteSettings(ctx)
+        if (prefs.settings.value.landscapeAll) SystemTv.lockLandscape(ctx)
+        if (prefs.settings.value.tvQuiet) MediaListenerService.setQuiet(ctx, true)
     }
 
     fun resume(item: ContinueItem) {
         val controller = MediaListenerService.active[item.packageName]
         val pending = controller?.sessionActivity
         val sent = pending != null && runCatching {
+            val options = LaunchOrigin.options() ?: ActivityOptions.makeBasic()
             if (Build.VERSION.SDK_INT >= 34) {
-                val options = ActivityOptions.makeBasic()
                 @Suppress("DEPRECATION")
                 options.setPendingIntentBackgroundActivityStartMode(
                     ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
                 )
-                pending.send(ctx, 0, null, null, null, null, options.toBundle())
-            } else {
-                pending.send()
             }
+            pending.send(ctx, 0, null, null, null, null, options.toBundle())
         }.isSuccess
         if (!sent) launchPackage(item.packageName)
         if (controller != null && controller.playbackState?.state != PlaybackState.STATE_PLAYING) {
@@ -1007,13 +1094,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun launchPackage(pkg: String) {
-        val intent = ctx.packageManager.getLaunchIntentForPackage(pkg)
+        val intent = tvIntentFor(pkg)
+            ?: ctx.packageManager.getLaunchIntentForPackage(pkg)
             ?: ctx.packageManager.getLeanbackLaunchIntentForPackage(pkg)
         if (intent == null) {
             toast("App non disponibile")
             return
         }
-        start(intent)
+        start(intent, animate = true)
     }
 
     fun removeContinue(item: ContinueItem) = store.remove(item.id)
@@ -1100,9 +1188,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun start(intent: Intent, quiet: Boolean = false): Boolean {
+    private fun start(intent: Intent, quiet: Boolean = false, animate: Boolean = false): Boolean {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching { ctx.startActivity(intent) }
+        val options = if (animate) LaunchOrigin.options()?.toBundle() else null
+        if (animate) LaunchOrigin.sourceBounds()?.let { intent.sourceBounds = it }
+        return runCatching { ctx.startActivity(intent, options) }
             .onFailure { if (!quiet) toast("Impossibile aprire") }
             .isSuccess
     }
@@ -1125,6 +1215,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             80 to "Crime", 18 to "Drammi", 35 to "Commedie", 10765 to "Fantascienza e fantasy", 9648 to "Mistero",
             10759 to "Azione e avventura", 16 to "Animazione", 99 to "Documentari", 10764 to "Reality",
         )
+        const val YOUTUBE = "com.google.android.youtube"
         const val MAX_PROVIDER_ROWS = 6
         const val CATALOG_TTL_MS = 6L * 60 * 60 * 1000
         const val HA_POLL_MS = 15_000L

@@ -1,6 +1,15 @@
 package it.peppedess.salotto.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -72,6 +81,34 @@ private sealed interface PinAction {
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun SalottoApp(vm: HomeViewModel) {
+    val returnTick by vm.returnTick.collectAsStateWithLifecycle()
+    val volume by vm.volumeHud.collectAsStateWithLifecycle()
+    val enter = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(returnTick) {
+        if (returnTick > 0) {
+            enter.snapTo(0f)
+            enter.animateTo(1f, tween(420, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Bg)
+            .graphicsLayer {
+                val p = enter.value
+                alpha = 0.35f + 0.65f * p
+                scaleX = 0.94f + 0.06f * p
+                scaleY = 0.94f + 0.06f * p
+            }
+    ) {
+        SalottoContent(vm)
+    }
+    VolumeHud(volume)
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun SalottoContent(vm: HomeViewModel) {
     var screen by rememberSaveable { mutableStateOf(Screen.Home) }
     var searchWithVoice by remember { mutableStateOf(false) }
     var pinAction by remember { mutableStateOf<PinAction?>(null) }
@@ -362,5 +399,57 @@ fun NavSoundProvider(vm: HomeViewModel, content: @Composable () -> Unit) {
     }
     CompositionLocalProvider(it.peppedess.salotto.ui.components.LocalNavSound provides sound) {
         content()
+    }
+}
+
+/** Indicatore del volume in stile Google TV: una barra verticale sul lato destro. */
+@Composable
+private fun VolumeHud(volume: Pair<Int, Int>?) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
+        AnimatedVisibility(
+            visible = volume != null,
+            enter = fadeIn(tween(150)) + slideInHorizontally(tween(200)) { it / 2 },
+            exit = fadeOut(tween(250)) + slideOutHorizontally(tween(250)) { it / 2 },
+        ) {
+            val last = remember { arrayOf(0 to 1) }
+            if (volume != null) last[0] = volume
+            val (level, max) = last[0]
+            val fraction = level.toFloat() / max
+            Column(
+                Modifier
+                    .padding(end = 28.dp)
+                    .width(56.dp)
+                    .height(240.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xE61F2228))
+                    .padding(vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("$level", color = Color.White, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .width(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(fraction.coerceIn(0f, 1f))
+                            .background(Color.White)
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Icon(
+                    if (level == 0) Icons.AutoMirrored.Rounded.VolumeOff else Icons.AutoMirrored.Rounded.VolumeUp,
+                    null,
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
     }
 }

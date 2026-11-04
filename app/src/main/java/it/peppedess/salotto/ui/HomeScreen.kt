@@ -90,7 +90,8 @@ internal val DefaultAmbient = Color(0xFF243044)
 private val BAR_WIDE = 64.dp
 private val BAR_NARROW = 108.dp
 
-private val TABS = listOf("Per te", "Film", "Serie TV", "Live", "App")
+// Ordine delle schede come su Google TV.
+private val TABS = listOf("Per te", "Live", "Film", "Serie TV", "App", "Libreria")
 private const val TAB_APPS = 4
 
 fun TmdbTitle.metaLine(): String = listOfNotNull(
@@ -124,6 +125,7 @@ fun HomeScreen(
     val haTiles by vm.haTiles.collectAsStateWithLifecycle()
     val weather by vm.weather.collectAsStateWithLifecycle()
     val myList by vm.myList.collectAsStateWithLifecycle()
+    val history by vm.history.collectAsStateWithLifecycle()
     val episodes by vm.newEpisodes.collectAsStateWithLifecycle()
     val recommendations by vm.recommendations.collectAsStateWithLifecycle()
     val live by vm.liveGuide.collectAsStateWithLifecycle()
@@ -148,7 +150,7 @@ fun HomeScreen(
     var showSleep by remember { mutableStateOf(false) }
     var showCastHelp by remember { mutableStateOf(false) }
 
-    val listStates = remember { List(4) { LazyListState() } }
+    val listStates = remember { List(TABS.size) { LazyListState() } }
     val firstFocus = remember { FocusRequester() }
     val topFocus = remember { FocusRequester() }
 
@@ -163,8 +165,8 @@ fun HomeScreen(
     LaunchedEffect(tab) {
         collapsed = false
         when (tab) {
-            1 -> vm.loadBrowse("movie")
-            2 -> vm.loadBrowse("tv")
+            2 -> vm.loadBrowse("movie")
+            3 -> vm.loadBrowse("tv")
         }
     }
     // Primo tasto del telecomando senza nulla selezionato: seleziona il primo elemento.
@@ -215,6 +217,7 @@ fun HomeScreen(
     val moviesTab = remember(movieRows, tmdbMissing) { buildCatalog("movie", movieRows, emptyList(), tmdbMissing, onSettings) }
     val seriesTab = remember(tvRows, episodes, tmdbMissing) { buildCatalog("tv", tvRows, episodes, tmdbMissing, onSettings) }
     val liveTab = remember(liveGuide, now, settings.liveTv) { buildLive(liveGuide, now, settings.liveTv, onSettings) }
+    val libraryTab = remember(media, myList, history, byPkg) { buildLibrary(media, myList, history, byPkg) }
 
     val onItem: (ShelfItem) -> Unit = { item ->
         when (item) {
@@ -294,9 +297,10 @@ fun HomeScreen(
                 Crossfade(targetState = tab, animationSpec = tween(260), label = "tab") { current ->
                     val content = when (current) {
                         0 -> forYou
-                        1 -> moviesTab
-                        2 -> seriesTab
-                        3 -> liveTab
+                        1 -> liveTab
+                        2 -> moviesTab
+                        3 -> seriesTab
+                        5 -> libraryTab
                         else -> null
                     }
                     if (content == null) {
@@ -588,6 +592,41 @@ private fun buildLive(
     return entries to featured
 }
 
+private fun buildLibrary(
+    media: List<ContinueItem>,
+    myList: List<TmdbTitle>,
+    history: List<TmdbTitle>,
+    byPkg: Map<String, AppEntry>,
+): Pair<List<BrowseEntry>, List<ShelfItem>> {
+    val entries = mutableListOf<BrowseEntry>()
+    val continueItems = media.map { ShelfItem.Continue(it, byPkg[it.packageName]) }
+    if (continueItems.isNotEmpty()) entries += Shelf("lib-continue", "Continua a guardare", continueItems)
+    val mine = myList.map { ShelfItem.Poster(it, DefaultAmbient, null, "lib/${it.key}") }
+    if (mine.isNotEmpty()) {
+        entries += Shelf("lib-list", "La mia lista", mine)
+        val movies = mine.filter { it.title.type == "movie" }
+        val shows = mine.filter { it.title.type == "tv" }
+        if (movies.isNotEmpty() && shows.isNotEmpty()) {
+            entries += Shelf("lib-movies", "Film nella tua lista", movies.map { it.copy(shareKey = "libm/${it.title.key}") })
+            entries += Shelf("lib-shows", "Serie nella tua lista", shows.map { it.copy(shareKey = "libs/${it.title.key}") })
+        }
+    }
+    if (history.isNotEmpty()) {
+        entries += Shelf("lib-history", "Visti di recente", history.map { ShelfItem.Poster(it, DefaultAmbient, null, "libh/${it.key}") })
+    }
+    if (entries.isEmpty()) {
+        entries += Hint(
+            "lib-empty",
+            Icons.Rounded.Movie,
+            "La tua libreria è vuota",
+            "Aggiungi film e serie a La mia lista dalla loro scheda: li ritrovi qui.",
+            {},
+        )
+    }
+    val featured = (mine + continueItems).filter { it.spotlight().art != null }.take(6)
+    return entries to featured
+}
+
 // ---------------------------------------------------------------------------
 // Barra in alto
 // ---------------------------------------------------------------------------
@@ -619,6 +658,9 @@ private fun TopBar(
             )
         }
     }
+    val search: @Composable () -> Unit = {
+        TvIconButton(Icons.Rounded.Search, "Cerca", onClick = { onSearch(false) })
+    }
     val actions: @Composable () -> Unit = {
         if (kidsRemaining != null) {
             Text(
@@ -628,26 +670,40 @@ private fun TopBar(
                 maxLines = 1,
             )
         }
-        if (!profile.kids) {
-            if (sleepEndsAt > now) {
-                TvPill(text = "${((sleepEndsAt - now) / 60_000L) + 1} min", icon = Icons.Rounded.Bedtime, onClick = onSleep)
-            }
-            TvIconButton(Icons.Rounded.Search, "Cerca", onClick = { onSearch(false) })
-            TvIconButton(Icons.Rounded.Mic, "Ricerca vocale", onClick = { onSearch(true) })
+        if (!profile.kids && sleepEndsAt > now) {
+            TvPill(text = "${((sleepEndsAt - now) / 60_000L) + 1} min", icon = Icons.Rounded.Bedtime, onClick = onSleep)
         }
-        if (!narrow) WeatherChip(weather, Modifier.padding(start = 6.dp))
         Clock(Modifier.padding(horizontal = 6.dp))
         if (!profile.kids) {
-            TvIconButton(Icons.Rounded.Settings, "Pannello rapido", onClick = onPanel)
+            TvIconButton(Icons.Rounded.Settings, "Impostazioni rapide", onClick = onPanel)
         }
-    }
-    val avatar: @Composable () -> Unit = {
         TvCard(onClick = onProfiles, modifier = Modifier.size(40.dp), shape = CircleShape, focusScale = 1.12f) {
             ProfileAvatar(profile, 40)
         }
     }
 
-    if (narrow && !profile.kids) {
+    if (profile.kids) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = start, end = 24.dp, top = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Ciao ${profile.name}!",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+            )
+            Spacer(Modifier.weight(1f))
+            actions()
+        }
+        return
+    }
+
+    if (narrow) {
         // Schermo stretto: icone sopra, schede sotto in una riga che scorre.
         Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
             Row(
@@ -657,7 +713,7 @@ private fun TopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                avatar()
+                search()
                 Spacer(Modifier.weight(1f))
                 actions()
             }
@@ -674,26 +730,17 @@ private fun TopBar(
         return
     }
 
+    // Come Google TV: Cerca a sinistra, poi le schede; a destra ora, impostazioni e profilo.
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = start - 4.dp, end = 28.dp, top = 6.dp),
+            .padding(start = start - 4.dp, end = 24.dp, top = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        avatar()
-        Spacer(Modifier.width(6.dp))
-        if (profile.kids) {
-            Text(
-                text = "Ciao ${profile.name}!",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                maxLines = 1,
-            )
-        } else {
-            tabs()
-        }
+        search()
+        Spacer(Modifier.width(4.dp))
+        tabs()
         Spacer(Modifier.weight(1f))
         actions()
     }

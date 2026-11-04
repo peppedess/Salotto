@@ -1,6 +1,8 @@
 package it.peppedess.salotto.service
 
 import android.content.ComponentName
+import android.content.Context
+import java.lang.ref.WeakReference
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadata
@@ -39,6 +41,8 @@ class MediaListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        instance = WeakReference(this)
+        if (getSharedPreferences("salotto", MODE_PRIVATE).getBoolean("tv_quiet", false)) setQuiet(this, true)
         val manager = getSystemService(MediaSessionManager::class.java) ?: return
         sessions = manager
         val component = ComponentName(this, MediaListenerService::class.java)
@@ -49,6 +53,7 @@ class MediaListenerService : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        instance = null
         runCatching { sessions?.removeOnActiveSessionsChangedListener(sessionsListener) }
         release()
         super.onListenerDisconnected()
@@ -198,6 +203,28 @@ class MediaListenerService : NotificationListenerService() {
             "com.audible", "com.google.android.apps.podcasts", "au.com.shiftyjelly.pocketcasts",
             "fm.castbox", "com.sonos", "tunein.player",
         )
+
+        private var instance: WeakReference<MediaListenerService>? = null
+
+        /**
+         * Modalità TV silenziosa: attiva "Non disturbare" (solo priorità) tramite il servizio
+         * notifiche, senza permessi in più. Disattivandola si ripristina solo se l'ha attivato Salotto.
+         */
+        fun setQuiet(context: Context, on: Boolean) {
+            val sp = context.getSharedPreferences("quiet", Context.MODE_PRIVATE)
+            val service = instance?.get() ?: return
+            runCatching {
+                if (on) {
+                    if (service.currentInterruptionFilter == NotificationListenerService.INTERRUPTION_FILTER_ALL) {
+                        service.requestInterruptionFilter(NotificationListenerService.INTERRUPTION_FILTER_PRIORITY)
+                        sp.edit().putBoolean("applied", true).apply()
+                    }
+                } else if (sp.getBoolean("applied", false)) {
+                    service.requestInterruptionFilter(NotificationListenerService.INTERRUPTION_FILTER_ALL)
+                    sp.edit().putBoolean("applied", false).apply()
+                }
+            }
+        }
 
         /** Controller delle sessioni ancora vive, per riprendere la riproduzione. */
         val active = ConcurrentHashMap<String, MediaController>()
