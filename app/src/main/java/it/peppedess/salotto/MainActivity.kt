@@ -23,6 +23,7 @@ import it.peppedess.salotto.ui.HomeViewModel
 import it.peppedess.salotto.ui.NavSoundProvider
 import it.peppedess.salotto.ui.components.AdaptiveScale
 import it.peppedess.salotto.ui.components.LaunchOrigin
+import it.peppedess.salotto.service.TvAccessibilityService
 import it.peppedess.salotto.ui.SalottoApp
 import it.peppedess.salotto.ui.theme.SalottoTheme
 import kotlinx.coroutines.flow.combine
@@ -116,7 +117,7 @@ class MainActivity : ComponentActivity() {
             vm.navKeyPressed()
         }
         // Volume in stile TV: Salotto cambia il volume e mostra il suo indicatore al posto di quello di MIUI.
-        if (event.keyCode in VOLUME_KEYS && vm.settings.value.tvVolume) {
+        if (event.keyCode in VOLUME_KEYS && vm.settings.value.tvVolume && !TvAccessibilityService.enabled.value) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 vm.userActivity()
                 vm.changeVolume(

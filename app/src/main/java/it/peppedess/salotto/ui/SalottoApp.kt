@@ -90,6 +90,7 @@ fun SalottoApp(vm: HomeViewModel) {
             enter.animateTo(1f, tween(420, easing = androidx.compose.animation.core.FastOutSlowInEasing))
         }
     }
+    val appSettings by vm.settings.collectAsStateWithLifecycle()
     Box(
         Modifier
             .fillMaxSize()
@@ -101,7 +102,11 @@ fun SalottoApp(vm: HomeViewModel) {
                 scaleY = 0.94f + 0.06f * p
             }
     ) {
-        SalottoContent(vm)
+        if (appSettings.setupDone) {
+            SalottoContent(vm)
+        } else {
+            SetupScreen(vm)
+        }
     }
     VolumeHud(volume)
 }

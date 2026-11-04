@@ -43,6 +43,7 @@ import it.peppedess.salotto.data.Updater
 import it.peppedess.salotto.data.WeekStats
 import it.peppedess.salotto.service.DailyWorker
 import it.peppedess.salotto.service.SleepTimer
+import it.peppedess.salotto.service.TvAccessibilityService
 import kotlinx.coroutines.Dispatchers
 import org.json.JSONObject
 import java.time.LocalDate
@@ -431,6 +432,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         _adminActive.value = ctx.getSystemService(DevicePolicyManager::class.java)
             ?.isAdminActive(Kiosk.admin(ctx)) == true
         _statsPermission.value = StatsRepository.hasPermission(ctx)
+        _isDefaultHome.value = checkDefaultHome()
         applySystemTv()
         if (lastCatalog > 0 && SystemClock.elapsedRealtime() - lastCatalog > CATALOG_TTL_MS) {
             catalogTick.value = catalogTick.value + 1
@@ -1055,12 +1057,40 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (enabled) {
             if (SystemTv.canWriteSettings(ctx)) {
                 SystemTv.lockLandscape(ctx)
-            } else {
+            } else if (!TvAccessibilityService.enabled.value) {
+                // Senza il servizio TV serve il permesso di modificare la rotazione di sistema.
                 start(Intent(AndroidSettings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}")))
             }
         } else {
             SystemTv.restoreRotation(ctx)
         }
+    }
+
+    // ---- Servizio TV e configurazione iniziale ----
+
+    val tvServiceEnabled: StateFlow<Boolean> = TvAccessibilityService.enabled.asStateFlow()
+
+    private val _isDefaultHome = MutableStateFlow(false)
+    val isDefaultHome: StateFlow<Boolean> = _isDefaultHome.asStateFlow()
+
+    private fun checkDefaultHome(): Boolean {
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val resolved = ctx.packageManager.resolveActivity(home, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        return resolved?.activityInfo?.packageName == ctx.packageName
+    }
+
+    fun openAccessibilitySettings() = start(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
+
+    fun openWriteSettings() = start(
+        Intent(AndroidSettings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+    )
+
+    fun completeSetup() {
+        prefs.updateSettings { it.copy(setupDone = true) }
+    }
+
+    fun restartSetup() {
+        prefs.updateSettings { it.copy(setupDone = false) }
     }
 
     fun setTvQuiet(enabled: Boolean) {

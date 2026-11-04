@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Salotto</string>
+    <string name="tv_service_name">Servizio TV di Salotto</string>
+    <string name="tv_service_description">Mostra l\'indicatore del volume in stile TV sopra tutte le app e, se lo attivi in Salotto, tiene lo schermo in orizzontale anche per le app che vorrebbero il verticale. Non legge il contenuto dello schermo.</string>
 </resources>

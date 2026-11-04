@@ -67,6 +67,8 @@ import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.ScreenLockLandscape
+import androidx.compose.material.icons.rounded.SettingsAccessibility
+import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.DoNotDisturbOn
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.MusicNote
@@ -100,6 +102,7 @@ fun SettingsScreen(
     val haStatus by vm.haStatus.collectAsStateWithLifecycle()
     val weather by vm.weather.collectAsStateWithLifecycle()
     val canWriteSettings by vm.canWriteSettings.collectAsStateWithLifecycle()
+    val tvService by vm.tvServiceEnabled.collectAsStateWithLifecycle()
     val epgStatus by vm.epgStatus.collectAsStateWithLifecycle()
     val adminActive by vm.adminActive.collectAsStateWithLifecycle()
     val statsAllowed by vm.statsPermission.collectAsStateWithLifecycle()
@@ -217,15 +220,28 @@ fun SettingsScreen(
             }
             item {
                 SettingRow(
+                    icon = Icons.Rounded.SettingsAccessibility,
+                    title = "Servizio TV di Salotto",
+                    subtitle = if (tvService) {
+                        "Attivo: volume in stile TV in tutte le app e orizzontale anche per le app bloccate in verticale"
+                    } else {
+                        "Non attivo: tocca e attiva \"Servizio TV di Salotto\" tra le app installate. Se è bloccato: Info app → ⋮ → Consenti impostazioni con restrizioni"
+                    },
+                    onClick = { vm.openAccessibilitySettings() },
+                )
+            }
+            item {
+                SettingRow(
                     icon = Icons.Rounded.ScreenLockLandscape,
                     title = "Tutte le app in orizzontale",
                     subtitle = when {
                         !settings.landscapeAll -> "Blocca la rotazione del telefono in orizzontale, come una TV"
-                        canWriteSettings -> "Attivo: le app si aprono in orizzontale (tranne quelle che lo impediscono)"
+                        tvService -> "Attivo per tutte le app, anche quelle bloccate in verticale"
+                        canWriteSettings -> "Attivo: le app si aprono in orizzontale (tranne quelle bloccate in verticale: per quelle attiva il Servizio TV)"
                         else -> "Serve il permesso \"Modifica impostazioni di sistema\": tocca per concederlo"
                     },
                     checked = settings.landscapeAll,
-                    onClick = { vm.setLandscapeAll(!settings.landscapeAll || !canWriteSettings) },
+                    onClick = { vm.setLandscapeAll(!settings.landscapeAll || !(canWriteSettings || tvService)) },
                 )
             }
             item {
@@ -527,6 +543,14 @@ fun SettingsScreen(
             }
 
             item { SectionTitle("Sistema") }
+            item {
+                SettingRow(
+                    icon = Icons.Rounded.Replay,
+                    title = "Rifai la configurazione iniziale",
+                    subtitle = "Home predefinita, permessi, film e serie, esperienza TV",
+                    onClick = { vm.restartSetup() },
+                )
+            }
             item {
                 SettingRow(
                     icon = Icons.Rounded.Home,
