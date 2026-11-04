@@ -38,6 +38,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
+        // Dopo un crash mostra l'errore invece di ripartire alla cieca.
+        if (CrashLog.pending(this) != null) {
+            startActivity(Intent(this, CrashActivity::class.java))
+            finish()
+            return
+        }
+
         // Come un launcher: "Indietro" sulla Home riporta a "Per te" e non chiude nulla.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {

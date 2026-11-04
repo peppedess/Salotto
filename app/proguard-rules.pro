@@ -12,3 +12,6 @@
 
 # Righe utili negli errori.
 -keepattributes SourceFile,LineNumberTable
+
+# Nomi leggibili nei rapporti di crash (R8 continua a ottimizzare e ridurre).
+-dontobfuscate

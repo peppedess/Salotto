@@ -253,6 +253,23 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _statsPermission = MutableStateFlow(false)
     val statsPermission: StateFlow<Boolean> = _statsPermission.asStateFlow()
 
+    // ---- Esperienza TV (dichiarati prima di init: init li usa subito) ----
+    private val _canWriteSettings = MutableStateFlow(false)
+    val canWriteSettings: StateFlow<Boolean> = _canWriteSettings.asStateFlow()
+
+    private val _volume = MutableStateFlow<Pair<Int, Int>?>(null)
+    /** Livello e massimo del volume da mostrare nell'indicatore in stile TV, null se nascosto. */
+    val volumeHud: StateFlow<Pair<Int, Int>?> = _volume.asStateFlow()
+    private var volumeJob: Job? = null
+
+    private val _returnTick = MutableStateFlow(0)
+    val returnTick: StateFlow<Int> = _returnTick.asStateFlow()
+
+    val tvServiceEnabled: StateFlow<Boolean> = TvAccessibilityService.enabled.asStateFlow()
+
+    private val _isDefaultHome = MutableStateFlow(false)
+    val isDefaultHome: StateFlow<Boolean> = _isDefaultHome.asStateFlow()
+
     private val packageCallback = object : LauncherApps.Callback() {
         override fun onPackageRemoved(packageName: String?, user: UserHandle?) = scheduleReload()
         override fun onPackageAdded(packageName: String?, user: UserHandle?) = scheduleReload()
@@ -1019,16 +1036,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Esperienza TV di sistema ----
 
-    private val _canWriteSettings = MutableStateFlow(false)
-    val canWriteSettings: StateFlow<Boolean> = _canWriteSettings.asStateFlow()
-
-    private val _volume = MutableStateFlow<Pair<Int, Int>?>(null)
-    /** Livello e massimo del volume da mostrare nell'indicatore in stile TV, null se nascosto. */
-    val volumeHud: StateFlow<Pair<Int, Int>?> = _volume.asStateFlow()
-    private var volumeJob: Job? = null
-
-    private val _returnTick = MutableStateFlow(0)
-    val returnTick: StateFlow<Int> = _returnTick.asStateFlow()
 
     fun returnedHome() {
         _returnTick.value = _returnTick.value + 1
@@ -1068,10 +1075,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Servizio TV e configurazione iniziale ----
 
-    val tvServiceEnabled: StateFlow<Boolean> = TvAccessibilityService.enabled.asStateFlow()
-
-    private val _isDefaultHome = MutableStateFlow(false)
-    val isDefaultHome: StateFlow<Boolean> = _isDefaultHome.asStateFlow()
 
     private fun checkDefaultHome(): Boolean {
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)

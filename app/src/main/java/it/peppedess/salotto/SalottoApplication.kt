@@ -10,6 +10,11 @@ import it.peppedess.salotto.data.Net
 
 class SalottoApplication : Application(), SingletonImageLoader.Factory {
 
+    override fun onCreate() {
+        super.onCreate()
+        CrashLog.install(this)
+    }
+
     /** Le immagini passano dallo stesso client di TMDB (con DNS sicuro). */
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
