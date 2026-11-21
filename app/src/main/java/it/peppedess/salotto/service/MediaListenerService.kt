@@ -12,6 +12,7 @@ import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
+import androidx.core.content.edit
 import it.peppedess.salotto.data.ContinueStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +31,9 @@ import java.util.concurrent.ConcurrentHashMap
 class MediaListenerService : NotificationListenerService() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Scritture dell'archivio una alla volta e in ordine, fuori dal thread dell'interfaccia. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val writer = Dispatchers.IO.limitedParallelism(1)
     private var sessions: MediaSessionManager? = null
     private val registered = mutableListOf<Pair<MediaController, MediaController.Callback>>()
     private val triedUris: MutableSet<String> = ConcurrentHashMap.newKeySet()
@@ -128,7 +132,7 @@ class MediaListenerService : NotificationListenerService() {
         val state = controller.playbackState
         val playing = state?.state == PlaybackState.STATE_PLAYING
         var position = state?.position ?: 0L
-        if (playing && state != null && state.lastPositionUpdateTime > 0) {
+        if (playing && state.lastPositionUpdateTime > 0) {
             val elapsed = SystemClock.elapsedRealtime() - state.lastPositionUpdateTime
             position += (elapsed * state.playbackSpeed).toLong()
         }
@@ -149,29 +153,34 @@ class MediaListenerService : NotificationListenerService() {
         }
 
         val store = ContinueStore.get(this)
-        store.upsert(
-            packageName = controller.packageName,
-            title = title,
-            subtitle = subtitle,
-            art = art,
-            positionMs = position,
-            durationMs = duration,
-            playing = playing,
-        )
-
-        // Molte app indicano anche l'indirizzo della copertina in alta risoluzione.
+        val pkg = controller.packageName
         val uris = listOfNotNull(
             md.getString(MediaMetadata.METADATA_KEY_ART_URI),
             md.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI),
             md.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI),
         ).filter { it.isNotBlank() }
+        scope.launch(writer) {
+            runCatching {
+                store.upsert(
+                    packageName = pkg,
+                    title = title,
+                    subtitle = subtitle,
+                    art = art,
+                    positionMs = position,
+                    durationMs = duration,
+                    playing = playing,
+                )
+            }
+        }
+        // Molte app indicano anche l'indirizzo della copertina in alta risoluzione:
+        // si scarica in parallelo, senza rallentare gli aggiornamenti successivi.
         if (uris.isEmpty()) return
-        val id = ContinueStore.idFor(controller.packageName, title)
+        val id = ContinueStore.idFor(pkg, title)
         val fresh = uris.filter { triedUris.add("$id|$it") }
         if (fresh.isEmpty()) return
         scope.launch {
             val best = fresh.mapNotNull { loadUri(it) }.maxByOrNull { it.width * it.height } ?: return@launch
-            store.updateArt(id, best)
+            launch(writer) { runCatching { store.updateArt(id, best) } }
         }
     }
 
@@ -183,6 +192,7 @@ class MediaListenerService : NotificationListenerService() {
         info?.category == android.content.pm.ApplicationInfo.CATEGORY_AUDIO
     }
 
+    /** Scarica la copertina con un limite di dimensione e la riduce se è enorme. */
     private fun loadUri(uri: String): Bitmap? = runCatching {
         val parsed = Uri.parse(uri)
         val stream = when (parsed.scheme) {
@@ -192,11 +202,29 @@ class MediaListenerService : NotificationListenerService() {
                 instanceFollowRedirects = true
             }.inputStream
             else -> contentResolver.openInputStream(parsed)
+        } ?: return@runCatching null
+        val bytes = stream.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(16_384)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                out.write(buf, 0, n)
+                if (out.size() > MAX_ART_BYTES) return@runCatching null
+            }
+            out.toByteArray()
         }
-        stream?.use { BitmapFactory.decodeStream(it) }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0) return@runCatching null
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= 1280) sample *= 2
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
     }.getOrNull()
 
     companion object {
+        private const val MAX_ART_BYTES = 12 * 1024 * 1024
+
         private val MUSIC_PREFIXES = listOf(
             "deezer.", "com.spotify", "com.google.android.apps.youtube.music", "com.amazon.mp3",
             "com.apple.android.music", "com.soundcloud", "com.aspiro.tidal", "com.qobuz",
@@ -217,11 +245,11 @@ class MediaListenerService : NotificationListenerService() {
                 if (on) {
                     if (service.currentInterruptionFilter == NotificationListenerService.INTERRUPTION_FILTER_ALL) {
                         service.requestInterruptionFilter(NotificationListenerService.INTERRUPTION_FILTER_PRIORITY)
-                        sp.edit().putBoolean("applied", true).apply()
+                        sp.edit { putBoolean("applied", true) }
                     }
                 } else if (sp.getBoolean("applied", false)) {
                     service.requestInterruptionFilter(NotificationListenerService.INTERRUPTION_FILTER_ALL)
-                    sp.edit().putBoolean("applied", false).apply()
+                    sp.edit { putBoolean("applied", false) }
                 }
             }
         }

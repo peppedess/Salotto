@@ -57,7 +57,10 @@ class VoiceInput(
         })
         recognizer = r
         onListening(true)
-        r.startListening(recognizerIntent())
+        runCatching { r.startListening(recognizerIntent()) }.onFailure {
+            onListening(false)
+            onFailure("Riconoscimento vocale non disponibile")
+        }
     }
 
     fun stop() {

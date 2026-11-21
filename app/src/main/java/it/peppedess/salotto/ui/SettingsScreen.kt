@@ -107,7 +107,9 @@ fun SettingsScreen(
     val canWriteSettings by vm.canWriteSettings.collectAsStateWithLifecycle()
     var showRemote by remember { mutableStateOf(false) }
     var pendingSaverSource by remember { mutableStateOf(0) }
-    val photoPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+    val photoPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        // Su Android 14 anche "Seleziona foto" va bene: si usano solo quelle scelte.
+        val granted = result.values.any { it } || PhotosRepository.hasPermission(context)
         vm.setScreensaverSource(if (granted) pendingSaverSource else 0)
     }
     val tvService by vm.tvServiceEnabled.collectAsStateWithLifecycle()
@@ -324,7 +326,7 @@ fun SettingsScreen(
                         val next = (settings.screensaverSource + 1) % 3
                         if (next != 0 && !PhotosRepository.hasPermission(context)) {
                             pendingSaverSource = next
-                            photoPermission.launch(PhotosRepository.permission)
+                            photoPermission.launch(PhotosRepository.permissions)
                         } else {
                             vm.setScreensaverSource(next)
                         }

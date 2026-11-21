@@ -16,11 +16,17 @@ data class PhotoItem(val uri: Uri, val takenAt: Long)
 /** Foto della galleria per il salvaschermo, come la modalità ambiente con Google Foto. */
 object PhotosRepository {
 
-    val permission: String
-        get() = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+    /** Permessi da chiedere: su Android 14 si può concedere anche solo una selezione di foto. */
+    val permissions: Array<String>
+        get() = when {
+            Build.VERSION.SDK_INT >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
 
-    fun hasPermission(context: Context): Boolean =
-        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    fun hasPermission(context: Context): Boolean = permissions.any {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
 
     /** Le foto più recenti, preferendo quelle orizzontali che riempiono bene lo schermo. */
     suspend fun recent(context: Context, limit: Int = 80): List<PhotoItem> = withContext(Dispatchers.IO) {
