@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">Salotto</string>
     <string name="tv_service_name">Servizio TV di Salotto</string>
-    <string name="tv_service_description">Mostra l\'indicatore del volume in stile TV sopra tutte le app e, se lo attivi in Salotto, tiene lo schermo in orizzontale anche per le app che vorrebbero il verticale. Non legge il contenuto dello schermo.</string>
+    <string name="tv_service_description">Mostra l\'indicatore del volume in stile TV sopra tutte le app e, se lo attivi in Salotto, tiene lo schermo in orizzontale anche per le app che vorrebbero il verticale. Con il telecomando dal telefono fa da touchpad (puntatore, tocchi e scorrimento) e scrive nel campo di testo selezionato: legge solo quel campo, non il resto dello schermo, e non invia nulla fuori dal telefono.</string>
 </resources>

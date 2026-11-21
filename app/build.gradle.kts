@@ -88,5 +88,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("com.google.zxing:core:3.5.4")
+    // Scanner QR di Google: niente permesso della fotocamera, lo gestisce Play Services.
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 }

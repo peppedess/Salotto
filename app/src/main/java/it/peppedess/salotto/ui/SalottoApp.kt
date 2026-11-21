@@ -68,7 +68,7 @@ import it.peppedess.salotto.ui.components.PinDialog
 import it.peppedess.salotto.ui.components.TvPill
 import it.peppedess.salotto.ui.theme.Bg
 
-enum class Screen { Home, Search, Settings, Detail, HaEntities, Stats, Profiles }
+enum class Screen { Home, Search, Settings, Detail, Person, HaEntities, Stats, Profiles }
 
 /** Azione che richiede il PIN prima di essere eseguita. */
 private sealed interface PinAction {
@@ -144,7 +144,10 @@ private fun SalottoContent(vm: HomeViewModel) {
     val kidsLocked by vm.kidsLocked.collectAsStateWithLifecycle()
 
     LaunchedEffect(homeTick) {
-        if (homeTick > 0) screen = Screen.Home
+        if (homeTick > 0) {
+            vm.clearPages()
+            screen = Screen.Home
+        }
     }
     // Ricerca inviata dal telecomando nel browser: apre la ricerca già compilata.
     val pendingSearch by vm.pendingSearch.collectAsStateWithLifecycle()
@@ -210,6 +213,7 @@ private fun SalottoContent(vm: HomeViewModel) {
                 onSettings = openSettings,
                 onAppMenu = { menuApp = it },
                 onOpenTitle = { title, app, shareKey ->
+                    vm.clearPages()
                     vm.openDetail(title, app, shareKey)
                     detailReturn = Screen.Home
                     screen = Screen.Detail
@@ -223,6 +227,7 @@ private fun SalottoContent(vm: HomeViewModel) {
                 startWithVoice = searchWithVoice,
                 onClose = { screen = Screen.Home },
                 onOpenTitle = { title ->
+                    vm.clearPages()
                     vm.openDetail(title, null)
                     searchWithVoice = false
                     detailReturn = Screen.Search
@@ -240,8 +245,21 @@ private fun SalottoContent(vm: HomeViewModel) {
 
             Screen.Detail -> DetailScreen(
                 vm = vm,
-                onClose = { screen = detailReturn },
-                onOpenTitle = { title -> vm.openDetail(title, null) },
+                onClose = { screen = vm.popPage() ?: detailReturn },
+                onOpenTitle = { title -> vm.openDetailFromPage(title, fromPerson = false) },
+                onPerson = { member ->
+                    vm.openPerson(member)
+                    screen = Screen.Person
+                },
+            )
+
+            Screen.Person -> PersonScreen(
+                vm = vm,
+                onClose = { screen = vm.popPage() ?: detailReturn },
+                onOpenTitle = { title ->
+                    vm.openDetailFromPage(title, fromPerson = true)
+                    screen = Screen.Detail
+                },
             )
 
             Screen.HaEntities -> HaEntitiesScreen(

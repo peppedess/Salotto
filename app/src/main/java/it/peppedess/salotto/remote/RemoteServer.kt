@@ -151,19 +151,24 @@ object RemoteServer {
             }
             method == "POST" && path == "/k" && authorized -> {
                 val key = query["k"].orEmpty()
-                main.post { runCatching { RemoteControl.key(context, key) } }
-                respond(out, 204, "text/plain", "")
+                val ok = onMain { RemoteControl.key(context, key) } != false
+                respond(out, if (ok) 204 else 409, "text/plain", "")
+            }
+            method == "POST" && (path == "/m" || path == "/s") && authorized -> {
+                // Touchpad: spostamento del puntatore (/m) o scorrimento a due dita (/s).
+                val dx = query["dx"]?.toFloatOrNull()?.coerceIn(-400f, 400f) ?: 0f
+                val dy = query["dy"]?.toFloatOrNull()?.coerceIn(-400f, 400f) ?: 0f
+                val ok = onMain { if (path == "/m") RemoteControl.move(dx, dy) else RemoteControl.scroll(dx, dy) } == true
+                respond(out, if (ok) 204 else 409, "text/plain", "")
+            }
+            method == "POST" && path == "/type" && authorized -> {
+                // Tastiera: il testo sostituisce quello del campo selezionato nell'app aperta.
+                val text = readBody(input, length)
+                val ok = onMain { RemoteControl.type(context, text) } == true
+                respond(out, if (ok) 204 else 409, "text/plain", "")
             }
             method == "POST" && path == "/text" && authorized -> {
-                // Il corpo si legge in byte: le lettere accentate occupano più di un byte.
-                val bytes = ByteArray(length.coerceIn(0, 4_000))
-                var read = 0
-                while (read < bytes.size) {
-                    val n = input.read(bytes, read, bytes.size - read)
-                    if (n < 0) break
-                    read += n
-                }
-                val text = String(bytes, 0, read, Charsets.UTF_8).trim().take(200)
+                val text = readBody(input, length).trim().take(200)
                 if (text.isNotEmpty()) main.post { runCatching { RemoteControl.text(context, text) } }
                 respond(out, 204, "text/plain", "")
             }
@@ -172,12 +177,32 @@ object RemoteServer {
         }
     }
 
+    /** Corpo della richiesta letto in byte: le lettere accentate occupano più di un byte. */
+    private fun readBody(input: InputStream, length: Int): String {
+        val bytes = ByteArray(length.coerceIn(0, 4_000))
+        var read = 0
+        while (read < bytes.size) {
+            val n = input.read(bytes, read, bytes.size - read)
+            if (n < 0) break
+            read += n
+        }
+        return String(bytes, 0, read, Charsets.UTF_8).take(500)
+    }
+
+    /** Esegue sul thread principale e aspetta l'esito (al massimo un secondo e mezzo). */
+    private fun <T> onMain(block: () -> T): T? {
+        val task = java.util.concurrent.FutureTask { runCatching(block).getOrNull() }
+        main.post(task)
+        return runCatching { task.get(1_500, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrNull()
+    }
+
     private fun respond(out: OutputStream, code: Int, type: String, body: String) {
         val bytes = body.toByteArray(Charsets.UTF_8)
         val status = when (code) {
             200 -> "OK"
             204 -> "No Content"
             403 -> "Forbidden"
+            409 -> "Conflict"
             else -> "Not Found"
         }
         val head = "HTTP/1.1 $code $status\r\n" +
@@ -208,13 +233,19 @@ object RemoteControl {
         "menu" to KeyEvent.KEYCODE_MENU,
     )
 
-    fun key(context: Context, key: String) {
+    /** Restituisce false se il comando non si può eseguire (es. serve il Servizio TV). */
+    fun key(context: Context, key: String): Boolean {
         val act = activity?.get()?.takeIf { resumed && !it.isFinishing }
         val service = TvAccessibilityService.instance?.get()
         when (key) {
             in keyCodes -> {
                 val code = keyCodes.getValue(key)
-                if (act != null) act.injectKey(code) else service?.remoteKey(key)
+                return if (act != null) {
+                    act.injectKey(code)
+                    true
+                } else {
+                    service?.remoteKey(key) == true
+                }
             }
             "home" -> {
                 if (service?.remoteKey("home") != true) {
@@ -224,6 +255,14 @@ object RemoteControl {
                         )
                     }
                 }
+            }
+            "tap", "longpress" -> return service?.tapCursor(long = key == "longpress") == true
+            "enter" -> {
+                if (act != null) {
+                    act.injectKey(KeyEvent.KEYCODE_ENTER)
+                    return true
+                }
+                return service?.imeEnter() == true
             }
             "play" -> mediaKey(context, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
             "volup", "voldown", "mute" -> {
@@ -243,6 +282,30 @@ object RemoteControl {
                 }
             }
         }
+        return true
+    }
+
+    /** Touchpad: serve il Servizio TV (disegna il puntatore e tocca al posto tuo). */
+    fun move(dx: Float, dy: Float): Boolean {
+        val service = TvAccessibilityService.instance?.get() ?: return false
+        service.moveCursor(dx, dy)
+        return true
+    }
+
+    fun scroll(dx: Float, dy: Float): Boolean =
+        TvAccessibilityService.instance?.get()?.scrollAtCursor(dx, dy) == true
+
+    /**
+     * Tastiera: in Salotto il testo va nella ricerca (che si aggiorna mentre scrivi),
+     * nelle altre app nel campo di testo selezionato.
+     */
+    fun type(context: Context, text: String): Boolean {
+        val act = activity?.get()?.takeIf { resumed && !it.isFinishing }
+        if (act != null) {
+            if (text.isNotBlank()) act.remoteSearch(text.take(200))
+            return true
+        }
+        return TvAccessibilityService.instance?.get()?.typeText(text) == true
     }
 
     fun text(context: Context, text: String) {

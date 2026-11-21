@@ -114,6 +114,14 @@ data class DetailState(
     val shareKey: String? = null,
 )
 
+/** Pagina di un attore o regista. */
+data class PersonState(
+    val member: it.peppedess.salotto.data.CastMember,
+    val details: it.peppedess.salotto.data.PersonDetails? = null,
+    val loading: Boolean = true,
+    val error: String? = null,
+)
+
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private val ctx: Application get() = getApplication()
@@ -184,6 +192,16 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _detail = MutableStateFlow<DetailState?>(null)
     val detail: StateFlow<DetailState?> = _detail.asStateFlow()
+
+    private val _person = MutableStateFlow<PersonState?>(null)
+    val person: StateFlow<PersonState?> = _person.asStateFlow()
+
+    /** Schede aperte una dall'altra (titolo → attore → titolo…), per il tasto Indietro. */
+    private sealed interface Page {
+        data class D(val state: DetailState) : Page
+        data class P(val state: PersonState) : Page
+    }
+    private val pages = ArrayDeque<Page>()
 
     private val catalogTick = MutableStateFlow(0)
     private var lastCatalog = 0L
@@ -677,9 +695,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun openDetail(title: TmdbTitle, app: AppEntry?, shareKey: String? = null) {
         _detail.value = DetailState(title, listOfNotNull(app), resolving = true, shareKey = shareKey)
         prefs.addHistory(title)
+        loadDetailExtras(title, app)
+    }
+
+    /** Dove guardarlo, dettagli e titoli simili. */
+    private fun loadDetailExtras(title: TmdbTitle, app: AppEntry?) {
         val key = prefs.settings.value.tmdbKey.trim()
         if (key.isBlank()) {
-            _detail.value = _detail.value?.copy(resolving = false)
+            updateDetail(title) { it.copy(resolving = false) }
             return
         }
         val client = TmdbClient(key)
@@ -697,12 +720,109 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 null
             }
-            updateDetail(title) { it.copy(details = details) }
+            if (details != null) updateDetail(title) { it.copy(details = details) }
         }
         viewModelScope.launch {
             val similar = safe { client.recommendations(title) }.filter { it.posterUrl != null }.take(15)
             updateDetail(title) { it.copy(similar = similar) }
         }
+    }
+
+    // ---- Attori e cronologia delle schede ----
+
+    /** Apre la pagina di un attore dalla scheda attuale. */
+    fun openPerson(member: it.peppedess.salotto.data.CastMember) {
+        _detail.value?.let { pushPage(Page.D(it)) }
+        _person.value = PersonState(member)
+        loadPerson(member)
+    }
+
+    /** Apre un titolo dalla pagina dell'attore o dai titoli simili, ricordando da dove si viene. */
+    fun openDetailFromPage(title: TmdbTitle, fromPerson: Boolean) {
+        if (fromPerson) {
+            _person.value?.let { pushPage(Page.P(it)) }
+        } else {
+            _detail.value?.let { pushPage(Page.D(it)) }
+        }
+        openDetail(title, null)
+    }
+
+    /** Torna alla scheda precedente; null se non ce ne sono (si torna alla Home o alla ricerca). */
+    fun popPage(): Screen? {
+        return when (val page = pages.removeLastOrNull()) {
+            null -> null
+            is Page.D -> {
+                _detail.value = page.state
+                val s = page.state
+                if (s.resolving || s.details == null || s.similar.isEmpty()) loadDetailExtras(s.title, s.apps.firstOrNull())
+                Screen.Detail
+            }
+            is Page.P -> {
+                _person.value = page.state
+                if (page.state.details == null) loadPerson(page.state.member)
+                Screen.Person
+            }
+        }
+    }
+
+    fun clearPages() = pages.clear()
+
+    private fun pushPage(page: Page) {
+        pages.addLast(page)
+        while (pages.size > MAX_PAGES) pages.removeFirst()
+    }
+
+    private fun loadPerson(member: it.peppedess.salotto.data.CastMember) {
+        val key = prefs.settings.value.tmdbKey.trim()
+        if (key.isBlank() || member.id <= 0) {
+            _person.value = PersonState(member, loading = false, error = "Scheda non disponibile")
+            return
+        }
+        viewModelScope.launch {
+            val result = try {
+                TmdbClient(key).person(member.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (_person.value?.member?.id == member.id) {
+                    _person.value = PersonState(member, loading = false, error = "Non riesco a caricare la scheda — " + describe(e))
+                }
+                return@launch
+            }
+            if (_person.value?.member?.id == member.id) {
+                _person.value = PersonState(member, result, loading = false)
+            }
+        }
+    }
+
+    // ---- Backup e ripristino ----
+
+    fun backupQr(): it.peppedess.salotto.data.Backup.QrBackup? = it.peppedess.salotto.data.Backup.qr(ctx)
+
+    fun backupJson(): String = it.peppedess.salotto.data.Backup.export(ctx)
+
+    /** Scrive il backup e riavvia Salotto, così ogni schermata riparte con le nuove impostazioni. */
+    fun restoreBackup(json: String): Boolean {
+        val ok = it.peppedess.salotto.data.Backup.restore(ctx, json)
+        if (!ok) {
+            toast("Backup non valido")
+            return false
+        }
+        RemoteServer.stop()
+        val intent = Intent(ctx, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        // Riapertura programmata subito dopo la chiusura del processo (come Home Android lo riapre comunque).
+        val pending = android.app.PendingIntent.getActivity(
+            ctx, 77, intent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_CANCEL_CURRENT,
+        )
+        runCatching {
+            ctx.getSystemService(android.app.AlarmManager::class.java)
+                ?.set(android.app.AlarmManager.RTC, System.currentTimeMillis() + 600, pending)
+        }
+        toast("Impostazioni ripristinate: Salotto si riavvia")
+        Handler(Looper.getMainLooper()).postDelayed({ Runtime.getRuntime().exit(0) }, 400)
+        return true
     }
 
     private fun updateDetail(title: TmdbTitle, change: (DetailState) -> DetailState) {
@@ -1335,6 +1455,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         const val WEATHER_TTL_MS = 30L * 60 * 1000
         const val KIDS_TICK_S = 30
         const val EPG_REFRESH_MS = 60L * 60 * 1000
+        const val MAX_PAGES = 20
 
         /** Ricevitori Cast/AirPlay/Miracast più diffusi. */
         val CAST_PACKAGES = setOf(

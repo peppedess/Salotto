@@ -48,7 +48,46 @@ data class TmdbTitle(
     }
 }
 
-data class CastMember(val name: String, val role: String, val photoUrl: String?)
+data class CastMember(val id: Int, val name: String, val role: String, val photoUrl: String?)
+
+/** Scheda di un attore o regista, con i suoi film e le sue serie. */
+data class PersonDetails(
+    val id: Int,
+    val name: String,
+    val biography: String,
+    val birthday: String,
+    val deathday: String,
+    val birthplace: String,
+    val department: String,
+    val photoUrl: String?,
+    val acting: List<TmdbTitle>,
+    val directing: List<TmdbTitle>,
+    val female: Boolean = false,
+) {
+    /** "Nato il 4 marzo 1965 a Roma (60 anni)". */
+    val lifeLine: String
+        get() {
+            val birth = runCatching { java.time.LocalDate.parse(birthday) }.getOrNull() ?: return birthplace
+            val death = runCatching { java.time.LocalDate.parse(deathday) }.getOrNull()
+            val fmt = java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale.ITALIAN)
+            val age = java.time.Period.between(birth, death ?: java.time.LocalDate.now()).years
+            return buildString {
+                append(if (female) "Nata il " else "Nato il ").append(birth.format(fmt))
+                if (birthplace.isNotBlank()) append(" a ").append(birthplace)
+                if (death != null) append(if (female) " · morta il " else " · morto il ").append(death.format(fmt)).append(" ($age anni)")
+                else append(" ($age anni)")
+            }
+        }
+
+    val departmentLabel: String
+        get() = when (department) {
+            "Acting" -> if (female) "Attrice" else "Attore"
+            "Directing" -> "Regista"
+            "Writing" -> if (female) "Sceneggiatrice" else "Sceneggiatore"
+            "Production" -> if (female) "Produttrice" else "Produttore"
+            else -> department
+        }
+}
 
 /** Dettagli completi di un titolo per la scheda. */
 data class TmdbDetails(
@@ -162,7 +201,7 @@ class TmdbClient(credential: String) {
                 } else {
                     str(c, "character")
                 }
-                CastMember(str(c, "name"), role, image(c, "profile_path", "w185"))
+                CastMember(c.optInt("id"), str(c, "name"), role, image(c, "profile_path", "w185"))
             }
         }.orEmpty()
 
@@ -196,6 +235,42 @@ class TmdbClient(credential: String) {
                 "In Production" -> "In produzione"
                 else -> ""
             },
+        )
+    }
+
+    /** Attore o regista: biografia (in italiano, altrimenti in inglese) e filmografia per popolarità. */
+    suspend fun person(id: Int): PersonDetails {
+        val o = get("/person/$id", mapOf("append_to_response" to "combined_credits"))
+        var bio = str(o, "biography")
+        if (bio.isBlank()) {
+            bio = runCatching { str(get("/person/$id", mapOf("language" to "en-US")), "biography") }.getOrDefault("")
+        }
+        val credits = o.optJSONObject("combined_credits")
+        fun titles(arr: org.json.JSONArray?, filter: (JSONObject) -> Boolean): List<TmdbTitle> {
+            if (arr == null) return emptyList()
+            return (0 until arr.length()).map { arr.getJSONObject(it) }
+                .filter(filter)
+                .filter { str(it, "media_type") == "movie" || str(it, "media_type") == "tv" }
+                // Niente talk show e ospitate: restano i ruoli veri.
+                .filterNot { str(it, "character").contains("Self", ignoreCase = true) || str(it, "character").contains("Himself", ignoreCase = true) || str(it, "character").contains("Herself", ignoreCase = true) }
+                .sortedByDescending { it.optDouble("popularity", 0.0) }
+                .mapNotNull { parseTitle(it, null) }
+                .filter { it.posterUrl != null }
+                .distinctBy { it.key }
+                .take(40)
+        }
+        return PersonDetails(
+            id = id,
+            name = str(o, "name"),
+            biography = bio,
+            birthday = str(o, "birthday"),
+            deathday = str(o, "deathday"),
+            birthplace = str(o, "place_of_birth"),
+            department = str(o, "known_for_department"),
+            photoUrl = image(o, "profile_path", "h632"),
+            acting = titles(credits?.optJSONArray("cast")) { true },
+            directing = titles(credits?.optJSONArray("crew")) { str(it, "job") == "Director" || str(it, "job") == "Creator" },
+            female = o.optInt("gender") == 1,
         )
     }
 
@@ -276,7 +351,7 @@ class TmdbClient(credential: String) {
             var lastError: IOException? = null
             for (host in HOSTS) {
                 val url = "https://$host/3$path".toHttpUrl().newBuilder().apply {
-                    addQueryParameter("language", "it-IT")
+                    if ("language" !in params) addQueryParameter("language", "it-IT")
                     params.forEach { (k, v) -> addQueryParameter(k, v) }
                     if (!bearer) addQueryParameter("api_key", credential)
                 }.build()

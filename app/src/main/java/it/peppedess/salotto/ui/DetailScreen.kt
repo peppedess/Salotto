@@ -73,6 +73,7 @@ import it.peppedess.salotto.data.CastMember
 import it.peppedess.salotto.data.TmdbTitle
 import it.peppedess.salotto.ui.components.LocalNarrow
 import it.peppedess.salotto.ui.components.PosterCard
+import it.peppedess.salotto.ui.components.TvCard
 import it.peppedess.salotto.ui.components.TvIconButton
 import it.peppedess.salotto.ui.components.TvPill
 import it.peppedess.salotto.ui.components.enterCascade
@@ -82,7 +83,12 @@ import java.util.Locale
 
 /** Scheda di un film o una serie: trama, generi, durata, cast, dove guardarlo e titoli simili. */
 @Composable
-fun DetailScreen(vm: HomeViewModel, onClose: () -> Unit, onOpenTitle: (TmdbTitle) -> Unit) {
+fun DetailScreen(
+    vm: HomeViewModel,
+    onClose: () -> Unit,
+    onOpenTitle: (TmdbTitle) -> Unit,
+    onPerson: (CastMember) -> Unit,
+) {
     BackHandler(onBack = onClose)
     val state by vm.detail.collectAsStateWithLifecycle()
     val detail = state
@@ -322,9 +328,9 @@ fun DetailScreen(vm: HomeViewModel, onClose: () -> Unit, onOpenTitle: (TmdbTitle
                         Spacer(Modifier.height(8.dp))
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            contentPadding = PaddingValues(end = 16.dp),
+                            contentPadding = PaddingValues(top = 6.dp, bottom = 6.dp, end = 16.dp),
                         ) {
-                            items(info.cast, key = { it.name + it.role }) { member -> CastChip(member) }
+                            items(info.cast, key = { it.id.toString() + it.name + it.role }) { member -> CastChip(member) { onPerson(member) } }
                         }
                     }
                 }
@@ -395,42 +401,53 @@ private fun InfoLine(label: String, value: String) {
     }
 }
 
+/** Attore del cast: si apre la sua pagina con film e serie. */
 @Composable
-private fun CastChip(member: CastMember) {
-    Column(
-        Modifier.width(84.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
+private fun CastChip(member: CastMember, onClick: () -> Unit) {
+    TvCard(
+        onClick = onClick,
+        modifier = Modifier.width(92.dp),
+        shape = RoundedCornerShape(16.dp),
+        focusScale = 1.06f,
+    ) { focused ->
+        Column(
             Modifier
-                .size(64.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.1f)),
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .background(if (focused) Color.White.copy(alpha = 0.14f) else Color.Transparent)
+                .padding(vertical = 6.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(Icons.Rounded.Person, null, tint = Color.White.copy(alpha = 0.5f))
-            if (member.photoUrl != null) {
-                AsyncImage(member.photoUrl, member.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Box(
+                Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Person, null, tint = Color.White.copy(alpha = 0.5f))
+                if (member.photoUrl != null) {
+                    AsyncImage(member.photoUrl, member.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                }
             }
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            member.name,
-            style = MaterialTheme.typography.labelMedium,
-            color = Color.White,
-            maxLines = 2,
-            textAlign = TextAlign.Center,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (member.role.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
             Text(
-                member.role,
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.55f),
-                maxLines = 1,
+                member.name,
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White,
+                maxLines = 2,
                 textAlign = TextAlign.Center,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (member.role.isNotBlank()) {
+                Text(
+                    member.role,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.55f),
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

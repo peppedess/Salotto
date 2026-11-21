@@ -74,6 +74,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Salotto">
 
+        <!-- Scarica in anticipo lo scanner QR di Google usato per il ripristino del backup. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

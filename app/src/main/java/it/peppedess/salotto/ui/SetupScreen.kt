@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.SettingsBackupRestore
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -87,6 +88,8 @@ fun SetupScreen(vm: HomeViewModel) {
         page = target.coerceIn(0, PAGES - 1)
     }
     BackHandler(enabled = page > 0) { go(page - 1) }
+    var showBackup by remember { mutableStateOf(false) }
+    if (showBackup) BackupDialog(vm = vm, onDismiss = { showBackup = false })
 
     Box(
         Modifier
@@ -112,7 +115,7 @@ fun SetupScreen(vm: HomeViewModel) {
                 verticalArrangement = Arrangement.Center,
             ) {
                 when (current) {
-                    0 -> WelcomePage()
+                    0 -> WelcomePage(onRestore = { showBackup = true })
                     1 -> HomePage(vm)
                     2 -> NotificationsPage(vm)
                     3 -> MoviesPage(vm)
@@ -180,7 +183,7 @@ private fun PageTitle(icon: ImageVector, title: String, text: String) {
 }
 
 @Composable
-private fun WelcomePage() {
+private fun WelcomePage(onRestore: () -> Unit) {
     Text(
         "Salotto",
         style = MaterialTheme.typography.displayMedium,
@@ -198,6 +201,12 @@ private fun WelcomePage() {
         "Ci vogliono un paio di minuti. Ogni passaggio si può saltare e rifare dalle impostazioni.",
         style = MaterialTheme.typography.bodyMedium,
         color = Color.White.copy(alpha = 0.6f),
+    )
+    Spacer(Modifier.height(16.dp))
+    TvPill(
+        text = "Ripristina da un altro telefono",
+        icon = Icons.Rounded.SettingsBackupRestore,
+        onClick = onRestore,
     )
 }
 

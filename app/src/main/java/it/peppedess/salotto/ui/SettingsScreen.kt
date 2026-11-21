@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.SettingsBackupRestore
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.DeleteSweep
@@ -106,6 +107,7 @@ fun SettingsScreen(
     val weather by vm.weather.collectAsStateWithLifecycle()
     val canWriteSettings by vm.canWriteSettings.collectAsStateWithLifecycle()
     var showRemote by remember { mutableStateOf(false) }
+    var showBackup by remember { mutableStateOf(false) }
     var pendingSaverSource by remember { mutableStateOf(0) }
     val photoPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         // Su Android 14 anche "Seleziona foto" va bene: si usano solo quelle scelte.
@@ -241,7 +243,7 @@ fun SettingsScreen(
                     icon = Icons.Rounded.SettingsAccessibility,
                     title = "Servizio TV di Salotto",
                     subtitle = if (tvService) {
-                        "Attivo: volume in stile TV in tutte le app e orizzontale anche per le app bloccate in verticale"
+                        "Attivo: volume in stile TV ovunque, orizzontale per tutte le app, touchpad e tastiera dal telecomando"
                     } else {
                         "Non attivo: tocca e attiva \"Servizio TV di Salotto\" tra le app installate. Se è bloccato: Info app → ⋮ → Consenti impostazioni con restrizioni"
                     },
@@ -583,6 +585,14 @@ fun SettingsScreen(
             item { SectionTitle("Sistema") }
             item {
                 SettingRow(
+                    icon = Icons.Rounded.SettingsBackupRestore,
+                    title = "Backup e ripristino",
+                    subtitle = "Porta le impostazioni su un altro telefono con un QR o un file",
+                    onClick = { showBackup = true },
+                )
+            }
+            item {
+                SettingRow(
                     icon = Icons.Rounded.Replay,
                     title = "Rifai la configurazione iniziale",
                     subtitle = "Home predefinita, permessi, film e serie, esperienza TV",
@@ -616,6 +626,9 @@ fun SettingsScreen(
         }
     }
 
+    if (showBackup) {
+        BackupDialog(vm = vm, onDismiss = { showBackup = false })
+    }
     if (showRemote) {
         RemoteDialog(vm = vm, onDismiss = { showRemote = false })
     }

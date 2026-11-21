@@ -99,9 +99,9 @@ internal fun RemoteDialog(vm: HomeViewModel, onDismiss: () -> Unit) {
                     Spacer(Modifier.height(2.dp))
                     Text(
                         if (tvService) {
-                            "Con il Servizio TV attivo il telecomando funziona anche dentro le altre app."
+                            "Con il Servizio TV attivo il telecomando funziona anche dentro le altre app: touchpad con puntatore e tastiera nei campi di testo."
                         } else {
-                            "Il telecomando comanda Salotto. Per usarlo anche dentro le altre app attiva il Servizio TV."
+                            "Il telecomando comanda Salotto. Per il touchpad con puntatore e la tastiera nelle altre app attiva il Servizio TV."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
