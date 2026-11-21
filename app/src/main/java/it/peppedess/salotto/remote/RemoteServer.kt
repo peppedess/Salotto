@@ -18,35 +18,41 @@ import it.peppedess.salotto.service.TvAccessibilityService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.InputStream
 import java.io.OutputStream
 import java.lang.ref.WeakReference
 import java.net.Inet4Address
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
 
 /**
  * Telecomando dal browser: un piccolo server HTTP sulla rete locale.
- * Ogni avvio genera un codice di 4 cifre incluso nel QR, così solo chi lo inquadra può comandare.
+ * Ogni avvio genera un codice di 6 cifre incluso nel QR, così solo chi lo inquadra può comandare;
+ * dopo troppi tentativi sbagliati il server smette di accettare codici.
  */
 object RemoteServer {
     const val PORT = 8765
 
     @Volatile private var server: ServerSocket? = null
     @Volatile private var token: String = ""
+    private val starting = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val failures = java.util.concurrent.atomic.AtomicInteger(0)
     private val main = Handler(Looper.getMainLooper())
 
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
 
     fun start(context: Context) {
-        if (server != null) return
+        // Una sola accensione alla volta: due avvii ravvicinati non si contendono la porta.
+        if (server != null || !starting.compareAndSet(false, true)) return
         val app = context.applicationContext
-        token = (1000..9999).random().toString()
+        token = (100000..999999).random().toString()
+        failures.set(0)
         Thread({
-            val socket = runCatching { ServerSocket(PORT).apply { reuseAddress = true } }.getOrNull()
+            val socket = runCatching { ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(PORT)) } }.getOrNull()
+            starting.set(false)
             if (socket == null) {
                 _running.value = false
                 return@Thread
@@ -55,15 +61,24 @@ object RemoteServer {
             _running.value = true
             while (!socket.isClosed) {
                 val client = runCatching { socket.accept() }.getOrNull() ?: break
-                Thread({ handle(app, client) }, "salotto-remote-client").apply { isDaemon = true }.start()
+                Thread({
+                    // Un client che si disconnette o manda dati strani non deve mai far chiudere Salotto.
+                    runCatching { handle(app, client) }
+                    runCatching { client.close() }
+                }, "salotto-remote-client").apply { isDaemon = true }.start()
             }
-            _running.value = false
+            // Solo il server ancora attuale aggiorna lo stato: uno nuovo potrebbe essere già partito.
+            if (server === socket || server == null) {
+                server = null
+                _running.value = false
+            }
         }, "salotto-remote").apply { isDaemon = true }.start()
     }
 
     fun stop() {
-        runCatching { server?.close() }
+        val s = server
         server = null
+        runCatching { s?.close() }
         _running.value = false
     }
 
@@ -87,56 +102,73 @@ object RemoteServer {
         return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
     }
 
-    private fun handle(context: Context, client: Socket) {
-        client.use { socket ->
-            socket.soTimeout = 5_000
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
-            val requestLine = reader.readLine() ?: return
-            val parts = requestLine.split(" ")
-            if (parts.size < 2) return
-            val method = parts[0]
-            val target = parts[1]
-            var length = 0
-            while (true) {
-                val line = reader.readLine() ?: break
-                if (line.isEmpty()) break
-                if (line.startsWith("Content-Length:", ignoreCase = true)) {
-                    length = line.substringAfter(":").trim().toIntOrNull() ?: 0
-                }
-            }
-            val path = target.substringBefore("?")
-            val query = target.substringAfter("?", "").split("&").mapNotNull {
-                val k = it.substringBefore("=", "")
-                if (k.isEmpty()) null else k to URLDecoder.decode(it.substringAfter("=", ""), "UTF-8")
-            }.toMap()
-            val out = socket.getOutputStream()
-            val authorized = query["t"] == token && token.isNotEmpty()
+    /** Legge una riga dell'intestazione HTTP byte per byte, con un limite di lunghezza. */
+    private fun readLine(input: InputStream): String? {
+        val buf = java.io.ByteArrayOutputStream()
+        while (true) {
+            val b = input.read()
+            if (b < 0) return if (buf.size() == 0) null else buf.toString("UTF-8")
+            if (b == '\n'.code) break
+            if (b != '\r'.code) buf.write(b)
+            if (buf.size() > 8_192) return null
+        }
+        return buf.toString("UTF-8")
+    }
 
-            when {
-                method == "GET" && (path == "/" || path == "/index.html") -> {
-                    if (authorized) respond(out, 200, "text/html; charset=utf-8", RemotePage.html(token))
-                    else respond(out, 403, "text/html; charset=utf-8", RemotePage.denied)
-                }
-                method == "POST" && path == "/k" && authorized -> {
-                    val key = query["k"].orEmpty()
-                    main.post { RemoteControl.key(context, key) }
-                    respond(out, 204, "text/plain", "")
-                }
-                method == "POST" && path == "/text" && authorized -> {
-                    val chars = CharArray(length.coerceIn(0, 2_000))
-                    var read = 0
-                    while (read < chars.size) {
-                        val n = reader.read(chars, read, chars.size - read)
-                        if (n < 0) break
-                        read += n
-                    }
-                    val text = String(chars, 0, read).trim()
-                    if (text.isNotEmpty()) main.post { RemoteControl.text(context, text) }
-                    respond(out, 204, "text/plain", "")
-                }
-                !authorized && path != "/favicon.ico" -> respond(out, 403, "text/plain", "Codice non valido")
-                else -> respond(out, 404, "text/plain", "")
+    private fun handle(context: Context, socket: Socket) {
+        socket.soTimeout = 5_000
+        val input = java.io.BufferedInputStream(socket.getInputStream())
+        val requestLine = readLine(input) ?: return
+        val parts = requestLine.split(" ")
+        if (parts.size < 2) return
+        val method = parts[0]
+        val target = parts[1]
+        var length = 0
+        var headers = 0
+        while (headers++ < 100) {
+            val line = readLine(input) ?: break
+            if (line.isEmpty()) break
+            if (line.startsWith("Content-Length:", ignoreCase = true)) {
+                length = line.substringAfter(":").trim().toIntOrNull() ?: 0
             }
+        }
+        val path = target.substringBefore("?")
+        val query = target.substringAfter("?", "").split("&").mapNotNull {
+            val k = it.substringBefore("=", "")
+            if (k.isEmpty()) null else k to runCatching { URLDecoder.decode(it.substringAfter("=", ""), "UTF-8") }.getOrDefault("")
+        }.toMap()
+        val out = socket.getOutputStream()
+
+        // Dopo troppi codici sbagliati il telecomando si blocca fino al prossimo avvio.
+        val locked = failures.get() >= MAX_FAILURES
+        val authorized = !locked && token.isNotEmpty() && query["t"] == token
+        if (!authorized && query.containsKey("t")) failures.incrementAndGet()
+
+        when {
+            method == "GET" && (path == "/" || path == "/index.html") -> {
+                if (authorized) respond(out, 200, "text/html; charset=utf-8", RemotePage.html(token))
+                else respond(out, 403, "text/html; charset=utf-8", RemotePage.denied)
+            }
+            method == "POST" && path == "/k" && authorized -> {
+                val key = query["k"].orEmpty()
+                main.post { runCatching { RemoteControl.key(context, key) } }
+                respond(out, 204, "text/plain", "")
+            }
+            method == "POST" && path == "/text" && authorized -> {
+                // Il corpo si legge in byte: le lettere accentate occupano più di un byte.
+                val bytes = ByteArray(length.coerceIn(0, 4_000))
+                var read = 0
+                while (read < bytes.size) {
+                    val n = input.read(bytes, read, bytes.size - read)
+                    if (n < 0) break
+                    read += n
+                }
+                val text = String(bytes, 0, read, Charsets.UTF_8).trim().take(200)
+                if (text.isNotEmpty()) main.post { runCatching { RemoteControl.text(context, text) } }
+                respond(out, 204, "text/plain", "")
+            }
+            !authorized && path != "/favicon.ico" -> respond(out, 403, "text/plain; charset=utf-8", "Codice non valido")
+            else -> respond(out, 404, "text/plain", "")
         }
     }
 
@@ -157,6 +189,8 @@ object RemoteServer {
         out.write(bytes)
         out.flush()
     }
+
+    private const val MAX_FAILURES = 30
 }
 
 /** Esegue i comandi del telecomando: dentro Salotto come tasti veri, fuori tramite il Servizio TV. */

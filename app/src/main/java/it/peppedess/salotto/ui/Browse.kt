@@ -393,11 +393,20 @@ fun BrowseScreen(
     // L'intestazione segue la selezione dopo un istante: niente scatti scorrendo veloce.
     val target = pinned ?: featured.getOrNull(featuredIndex % featured.size.coerceAtLeast(1))
     var shown by remember { mutableStateOf(target) }
-    LaunchedEffect(target?.key) {
-        if (shown != null && target != null) delay(160)
+    LaunchedEffect(target) {
+        // Ritardo solo cambiando elemento; se cambia il contenuto (avanzamento, programma) si aggiorna subito.
+        if (shown != null && target != null && shown?.key != target.key) delay(160)
         shown = target
     }
-    val spotlight = remember(shown) { shown?.spotlight() }
+    // Il "tempo" della diretta si aggiorna ogni minuto anche restando fermi sullo stesso canale.
+    var minute by remember { mutableStateOf(System.currentTimeMillis() / 60_000L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L - System.currentTimeMillis() % 60_000L)
+            minute = System.currentTimeMillis() / 60_000L
+        }
+    }
+    val spotlight = remember(shown, minute) { shown?.spotlight() }
 
     val collapsed = if (pinned != null) focusedRow >= 1 else touchCollapsed
     LaunchedEffect(collapsed) { onCollapsedChange(collapsed) }

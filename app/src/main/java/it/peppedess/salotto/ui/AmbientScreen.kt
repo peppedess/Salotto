@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -148,7 +149,7 @@ fun AmbientScreen(vm: HomeViewModel) {
         Column(
             Modifier
                 .align(Alignment.BottomStart)
-                .offset(x = dx, y = -dy)
+                .offset { IntOffset(dx.roundToPx(), -dy.roundToPx()) }
                 .padding(start = 48.dp, bottom = 36.dp)
         ) {
             Text(
@@ -186,7 +187,7 @@ fun AmbientScreen(vm: HomeViewModel) {
             Row(
                 Modifier
                     .align(Alignment.BottomEnd)
-                    .offset(x = -dx, y = -dy)
+                    .offset { IntOffset(-dx.roundToPx(), -dy.roundToPx()) }
                     .padding(end = 48.dp, bottom = 40.dp),
                 horizontalArrangement = Arrangement.End,
             ) {

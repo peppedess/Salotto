@@ -218,10 +218,15 @@ private fun HomePage(vm: HomeViewModel) {
         title = if (isHome) "Salotto è la tua schermata Home" else "Imposta come schermata Home",
         done = isHome,
         onClick = {
-            val rm = if (Build.VERSION.SDK_INT >= 29) context.getSystemService(RoleManager::class.java) else null
-            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME) && !rm.isRoleHeld(RoleManager.ROLE_HOME)) {
-                runCatching { roleLauncher.launch(rm.createRequestRoleIntent(RoleManager.ROLE_HOME)) }
-                    .onFailure { vm.openHomeSettings() }
+            // RoleManager esiste da Android 10: prima si apre la scelta della Home di sistema.
+            val request = if (Build.VERSION.SDK_INT >= 29) {
+                val rm = context.getSystemService(RoleManager::class.java)
+                if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME) && !rm.isRoleHeld(RoleManager.ROLE_HOME)) {
+                    rm.createRequestRoleIntent(RoleManager.ROLE_HOME)
+                } else null
+            } else null
+            if (request != null) {
+                runCatching { roleLauncher.launch(request) }.onFailure { vm.openHomeSettings() }
             } else {
                 vm.openHomeSettings()
             }

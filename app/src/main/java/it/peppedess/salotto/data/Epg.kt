@@ -77,9 +77,13 @@ class EpgRepository(context: Context) {
         }
         try {
             val guides = download()
+            // Un file vuoto o troncato non deve cancellare una guida buona già salvata.
+            if (guides.all { it.programmes.isEmpty() }) throw IOException("Guida TV vuota")
             writeCache(guides)
             guides
-        } catch (e: IOException) {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
             readCache() ?: throw e
         }
     }

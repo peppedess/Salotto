@@ -1,5 +1,6 @@
 package it.peppedess.salotto
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Bundle
@@ -89,6 +90,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Tasto arrivato dal telecomando nel browser: entra come un tasto vero. */
+    @SuppressLint("RestrictedApi")
     fun injectKey(code: Int) {
         val now = android.os.SystemClock.uptimeMillis()
         dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0))
@@ -141,6 +143,7 @@ class MainActivity : ComponentActivity() {
 
     private var swallowKey = false
 
+    @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && event.keyCode in NAV_KEYS) {
             vm.navKeyPressed()

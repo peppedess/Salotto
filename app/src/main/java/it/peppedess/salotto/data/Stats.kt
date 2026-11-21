@@ -26,6 +26,7 @@ object StatsRepository {
     fun hasPermission(context: Context): Boolean {
         val ops = context.getSystemService(AppOpsManager::class.java) ?: return false
         val mode = if (Build.VERSION.SDK_INT >= 29) {
+            @Suppress("DEPRECATION")
             ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
         } else {
             @Suppress("DEPRECATION")
