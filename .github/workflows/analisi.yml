@@ -24,11 +24,13 @@ jobs:
       - name: Avvisi Kotlin
         if: always()
         shell: bash
-        run: grep -E '^(w|e): ' build.log || echo "nessuno"
+        run: |
+          grep -E '^(w|e): ' build.log || echo "nessuno"
       - name: Rapporto lint
         if: always()
         shell: bash
-        run: cat app/build/reports/lint-results-release.txt 2>/dev/null || find app/build/reports -name '*.txt'
+        run: |
+          cat app/build/reports/lint-results-release.txt 2>/dev/null || find app/build -name 'lint-results*'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
